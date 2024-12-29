@@ -86,7 +86,7 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                 yield result, None, f"Processing frame {i+1}/{len(frames)}... Elapsed time: {elapsed_time:.2f} seconds"
         
         processed_video = ImageSequenceClip(processed_frames, fps=fps)
-        processed_video = processed_video.set_audio(audio)
+        processed_video = processed_video.with_audio(audio)
         
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
             temp_filepath = temp_file.name
