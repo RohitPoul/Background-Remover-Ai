@@ -4,7 +4,6 @@ import spaces
 from transformers import AutoModelForImageSegmentation
 import torch
 from torchvision import transforms
-import moviepy as mp
 from pydub import AudioSegment
 from PIL import Image
 import numpy as np
@@ -13,6 +12,7 @@ import tempfile
 import uuid
 import time
 from concurrent.futures import ThreadPoolExecutor
+from moviepy import VideoFileClip, vfx, concatenate_videoclips, ImageSequenceClip
 
 torch.set_float32_matmul_precision("medium")
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -53,7 +53,7 @@ def process_frame(frame, bg_type, bg, fast_mode, bg_frame_index, background_fram
 def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=0, video_handling="slow_down", fast_mode=True, max_workers=6):
     try:
         start_time = time.time()  # Start the timer
-        video = mp.VideoFileClip(vid)
+        video = VideoFileClip(vid)
         if fps == 0:
             fps = video.fps
         
@@ -64,12 +64,12 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
         yield gr.update(visible=True), gr.update(visible=False), f"Processing started... Elapsed time: 0 seconds"
         
         if bg_type == "Video":
-            background_video = mp.VideoFileClip(bg_video)
+            background_video = VideoFileClip(bg_video)
             if background_video.duration < video.duration:
                 if video_handling == "slow_down":
-                    background_video = background_video.fx(mp.vfx.speedx, factor=video.duration / background_video.duration)
+                    background_video = background_video.fx(vfx.speedx, factor=video.duration / background_video.duration)
                 else:  # video_handling == "loop"
-                    background_video = mp.concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
+                    background_video = concatenate_videoclips([background_video] * int(video.duration / background_video.duration + 1))
             background_frames = list(background_video.iter_frames(fps=fps))
         else:
             background_frames = None
@@ -85,7 +85,7 @@ def fn(vid, bg_type="Color", bg_image=None, bg_video=None, color="#00FF00", fps=
                 elapsed_time = time.time() - start_time
                 yield result, None, f"Processing frame {i+1}/{len(frames)}... Elapsed time: {elapsed_time:.2f} seconds"
         
-        processed_video = mp.ImageSequenceClip(processed_frames, fps=fps)
+        processed_video = ImageSequenceClip(processed_frames, fps=fps)
         processed_video = processed_video.set_audio(audio)
         
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
