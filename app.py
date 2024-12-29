@@ -24,7 +24,7 @@ birefnet_lite = AutoModelForImageSegmentation.from_pretrained("ZhengPeng7/BiRefN
 birefnet_lite.to(device)
 
 transform_image = transforms.Compose([
-    transforms.Resize((1024, 1024)),
+    transforms.Resize((768, 768)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 ])
