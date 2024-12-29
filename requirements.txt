@@ -16,3 +16,4 @@ schedule
 loadimg>=0.1.1
 moviepy 
 pydub
+einops
