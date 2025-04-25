@@ -4,7 +4,7 @@ emoji: 📽️
 colorFrom: purple
 colorTo: pink
 sdk: gradio
-sdk_version: 5.1.0
+sdk_version: 5.26.0
 app_file: app.py
 pinned: true
 short_description: Remove/Change background of video.
