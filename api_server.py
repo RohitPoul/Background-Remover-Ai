@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from transformers import AutoModelForImageSegmentation
 import torch
 from torchvision import transforms
@@ -11,7 +12,10 @@ import uuid
 import time
 import sys
 import gc
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from moviepy.editor import VideoFileClip, ImageSequenceClip
+from werkzeug.utils import secure_filename
 
 # Set FFMPEG path for moviepy
 os.environ['IMAGEIO_FFMPEG_EXE'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin', 'ffmpeg.exe')
@@ -102,14 +106,33 @@ def monitor_memory_usage(session_id):
     try:
         import psutil
         memory = psutil.virtual_memory()
-        if memory.percent > 90:
+        if memory.percent > 95:  # Increased threshold to 95%
             print(f"[{session_id}] CRITICAL: Memory usage at {memory.percent}%")
+            # Force garbage collection before stopping
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return False
-        elif memory.percent > 80:
+        elif memory.percent > 85:  # Warning at 85%
             print(f"[{session_id}] WARNING: Memory usage at {memory.percent}%")
+            # Proactive cleanup at warning level
+            gc.collect()
         return True
     except Exception:
         return True
+
+def force_memory_cleanup():
+    """Aggressive memory cleanup"""
+    try:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # Additional cleanup for PyTorch tensors
+        import torch
+        if hasattr(torch, '_C') and hasattr(torch._C, '_cuda_emptyCache'):
+            torch._C._cuda_emptyCache()
+    except Exception as e:
+        print(f"Memory cleanup warning: {e}")
 
 def cleanup_on_exit():
     """Cleanup function called on exit"""
@@ -618,6 +641,210 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 print(f"[{session_id}] Removed background file")
         except Exception as cleanup_err:
             print(f"[{session_id}] Cleanup warning: {cleanup_err}")
+
+def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, video_handling, fast_mode, max_workers, output_format):
+    """Asynchronous video processing function"""
+    try:
+        print(f"[{session_id}] Starting video processing with settings: bg_type={bg_type}, fast_mode={fast_mode}, max_workers={max_workers}")
+        
+        # Load video
+        clip = VideoFileClip(video_path)
+        if fps == 0:
+            fps = clip.fps
+        print(f"[{session_id}] Using original video FPS: {fps}")
+        
+        # Extract audio
+        audio = None
+        try:
+            audio = clip.audio
+        except Exception as e:
+            print(f"[{session_id}] No audio track or audio extraction failed: {e}")
+        
+        # Load frames
+        print(f"[{session_id}] Loading video frames...")
+        frames = list(clip.iter_frames())
+        total_frames = len(frames)
+        print(f"[{session_id}] Total frames to process: {total_frames}")
+        
+        # Process frames in small batches to manage memory
+        batch_size = 2  # Very small batches for memory management
+        processed_frames = []
+        
+        # Calculate batches
+        num_batches = (total_frames + batch_size - 1) // batch_size
+        print(f"[{session_id}] Processing in {num_batches} batches of up to {batch_size} frames each")
+        
+        model = birefnet_lite if fast_mode else birefnet
+        if model is None:
+            raise Exception("Model not loaded")
+        
+        for batch_idx in range(num_batches):
+            if session_id not in active_sessions:
+                print(f"[{session_id}] Processing cancelled by user")
+                break
+                
+            # Check memory before processing batch
+            if not monitor_memory_usage(session_id):
+                print(f"[{session_id}] Stopping processing due to memory constraints")
+                continue  # Skip this batch but continue with others
+                
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, total_frames)
+            batch_frames = frames[start_idx:end_idx]
+            
+            print(f"[{session_id}] Processing batch {batch_idx + 1}/{num_batches}, frames {start_idx}-{end_idx}")
+            
+            # Process each frame in the batch
+            for i, frame in enumerate(batch_frames):
+                frame_idx = start_idx + i
+                
+                # Check memory before each frame
+                if not monitor_memory_usage(session_id):
+                    print(f"[{session_id}] Stopping processing due to memory constraints")
+                    break
+                
+                try:
+                    # Convert frame to PIL Image
+                    pil_image = Image.fromarray(frame)
+                    
+                    # Process with model
+                    with torch.no_grad():
+                        # Preprocess
+                        transform = transforms.Compose([
+                            transforms.Resize((1024, 1024)),
+                            transforms.ToTensor(),
+                            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                        ])
+                        input_tensor = transform(pil_image).unsqueeze(0).to(device)
+                        
+                        # Get prediction
+                        prediction = model(input_tensor)
+                        prediction = torch.sigmoid(prediction)
+                        prediction = prediction.cpu().numpy().squeeze()
+                        
+                        # Resize mask back to original size
+                        mask = Image.fromarray((prediction * 255).astype(np.uint8)).resize(pil_image.size)
+                        mask_array = np.array(mask) / 255.0
+                        
+                        # Apply background replacement
+                        if bg_type == 'Transparent':
+                            # Create RGBA image
+                            result = Image.new('RGBA', pil_image.size)
+                            result_array = np.array(result)
+                            pil_array = np.array(pil_image)
+                            
+                            result_array[:, :, :3] = pil_array
+                            result_array[:, :, 3] = (mask_array * 255).astype(np.uint8)
+                            
+                            processed_frame = Image.fromarray(result_array, 'RGBA')
+                        else:
+                            # Solid color background
+                            if bg_type == 'Color':
+                                # Convert hex color to RGB
+                                bg_color = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+                                bg_image = Image.new('RGB', pil_image.size, bg_color)
+                            else:
+                                # For now, fallback to green screen for other types
+                                bg_image = Image.new('RGB', pil_image.size, (0, 255, 0))
+                            
+                            # Composite foreground and background
+                            pil_array = np.array(pil_image)
+                            bg_array = np.array(bg_image)
+                            
+                            # Apply mask
+                            mask_3d = np.stack([mask_array] * 3, axis=2)
+                            result_array = pil_array * mask_3d + bg_array * (1 - mask_3d)
+                            
+                            processed_frame = Image.fromarray(result_array.astype(np.uint8))
+                        
+                        # Convert back to numpy array for MoviePy
+                        processed_frames.append(np.array(processed_frame.convert('RGB')))
+                        
+                        # Progress update
+                        progress = ((frame_idx + 1) / total_frames) * 100
+                        socketio.emit('progress', {
+                            'session_id': session_id,
+                            'progress': progress,
+                            'current_frame': frame_idx + 1,
+                            'total_frames': total_frames
+                        })
+                        print(f"[{session_id}] Progress: {progress:.1f}%, Frame: {frame_idx + 1}/{total_frames}")
+                        
+                except Exception as frame_error:
+                    print(f"[{session_id}] Error processing frame {frame_idx}: {frame_error}")
+                    continue
+            
+            # Cleanup after each batch
+            force_memory_cleanup()
+        
+        # Create final video
+        print(f"[{session_id}] Creating final video with {len(processed_frames)} processed frames")
+        
+        if len(processed_frames) == 0:
+            raise Exception("No frames were successfully processed")
+        
+        # Create video clip
+        processed_video = ImageSequenceClip(processed_frames, fps=fps)
+        
+        # Add audio if available
+        if audio is not None:
+            try:
+                processed_video = processed_video.with_audio(audio)
+                print(f"[{session_id}] Audio added to video")
+            except Exception as audio_error:
+                print(f"[{session_id}] Could not add audio: {audio_error}")
+        
+        # Generate output filename
+        output_filename = f"temp_output_{session_id}.mp4"  # Always use MP4 to avoid WebM issues
+        output_path = output_filename
+        
+        # Write video file (always MP4 for compatibility)
+        print(f"[{session_id}] Writing MP4 video to {output_filename}")
+        processed_video.write_videofile(
+            output_path,
+            codec='libx264',
+            audio_codec='aac' if audio is not None else None,
+            temp_audiofile=f"temp_audio_{session_id}.m4a",
+            remove_temp=True,
+            verbose=False,
+            logger=None
+        )
+        
+        # Cleanup
+        clip.close()
+        processed_video.close()
+        
+        # Notify completion
+        socketio.emit('processing_complete', {
+            'session_id': session_id,
+            'download_url': f'/api/download/{output_filename}',
+            'message': 'Video processing completed successfully'
+        })
+        
+        print(f"[{session_id}] Processing completed successfully")
+        
+    except Exception as e:
+        print(f"[{session_id}] Processing error: {e}")
+        socketio.emit('processing_error', {
+            'session_id': session_id,
+            'error': str(e)
+        })
+    finally:
+        # Cleanup session
+        if session_id in active_sessions:
+            del active_sessions[session_id]
+        
+        # Cleanup files
+        try:
+            if os.path.exists(video_path):
+                os.remove(video_path)
+            if bg_path and os.path.exists(bg_path):
+                os.remove(bg_path)
+        except Exception as cleanup_error:
+            print(f"[{session_id}] Cleanup error: {cleanup_error}")
+        
+        # Final memory cleanup
+        force_memory_cleanup()
 
 @app.route('/api/process_video', methods=['POST'])
 def process_video():
