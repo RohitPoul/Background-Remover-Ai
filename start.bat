@@ -61,12 +61,18 @@ echo Python API will run on http://localhost:5000
 echo Electron app will open shortly...
 echo.
 set REACT_APP_API_BASE=http://localhost:5000
+
+echo Starting Electron application...
 npm start
 
+REM If we reach here, the app has closed
 echo.
-echo If the application didn't start, please check:
+echo Application closed.
+echo.
+echo If there were any issues, check:
 echo 1. Python is installed and in your PATH
-echo 2. FFMPEG is in the bin directory
+echo 2. FFMPEG is in the bin directory  
 echo 3. Node.js is installed and in your PATH
+echo 4. Check logs folder for Python error details
 echo.
 pause

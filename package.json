@@ -5,14 +5,14 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "npm run download-ffmpeg && npm run build:react && npx electron .",
+    "dev": "concurrently \"npm run dev:python\" \"npm run dev:electron\"",
+    "dev:python": "python api_server.py",
+    "dev:electron": "wait-on http://localhost:5000 && npx electron .",
     "download-ffmpeg": "node download_ffmpeg.js || echo FFMPEG download failed but continuing",
     "build": "cd frontend && npm run build && electron-builder",
     "build:react": "cd frontend && npm run build",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "start:app": "echo Deprecated",
-    "start:python": "echo Deprecated",
-    "start:electron": "echo Deprecated",
     "postinstall": "cd frontend && npm install"
   },
   "build": {
