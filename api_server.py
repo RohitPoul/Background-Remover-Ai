@@ -753,14 +753,7 @@ def health_check():
             'error': str(e)
         })
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint for frontend to verify server is ready"""
-    return jsonify({
-        'status': 'healthy',
-        'message': 'Video processing server is running',
-        'timestamp': time.time()
-    })
+
 
 @socketio.on('connect')
 def handle_connect():
