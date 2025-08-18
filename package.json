@@ -1,0 +1,61 @@
+{
+  "name": "video-background-remover",
+  "version": "1.0.0",
+  "description": "Modern Electron app for video background removal and replacement",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "npm run download-ffmpeg && npm run build:react && npx electron .",
+    "download-ffmpeg": "node download_ffmpeg.js || echo FFMPEG download failed but continuing",
+    "build": "cd frontend && npm run build && electron-builder",
+    "build:react": "cd frontend && npm run build",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "start:app": "echo Deprecated",
+    "start:python": "echo Deprecated",
+    "start:electron": "echo Deprecated",
+    "postinstall": "cd frontend && npm install"
+  },
+  "build": {
+    "appId": "com.videoprocessor.app",
+    "productName": "Video Background Remover",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/build/**/*",
+      "api_server.py",
+      "api_requirements.txt",
+      "bin/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "keywords": [
+    "video",
+    "background",
+    "removal",
+    "AI",
+    "electron"
+  ],
+  "author": "Video Background Remover Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.1",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "extract-zip": "^2.0.1"
+  }
+}
