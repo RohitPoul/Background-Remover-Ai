@@ -5,12 +5,10 @@ import {
   Typography,
   Paper,
   Grid,
-  Chip,
 } from '@mui/material';
 import {
   Timer as TimerIcon,
   Speed as SpeedIcon,
-  Memory as MemoryIcon,
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 

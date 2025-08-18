@@ -35,15 +35,17 @@ if exist api_requirements.txt (
 
 REM Check if FFMPEG exists
 if not exist bin\ffmpeg.exe (
-    echo FFMPEG not found. Downloading...
-    call npm run download-ffmpeg
-    if not exist bin\ffmpeg.exe (
-        echo WARNING: FFMPEG download may have failed.
-        echo You can download it manually from https://www.gyan.dev/ffmpeg/builds/
-        echo and place ffmpeg.exe in the bin directory.
-        echo.
-        echo Continuing anyway...
-    )
+    echo.
+    echo WARNING: FFMPEG not found in bin\ffmpeg.exe
+    echo.
+    echo Please download FFMPEG manually:
+    echo 1. Go to: https://www.gyan.dev/ffmpeg/builds/
+    echo 2. Download the "essentials" build
+    echo 3. Extract ffmpeg.exe to the bin\ directory
+    echo.
+    echo The application will continue but video processing won't work without FFMPEG.
+    echo.
+    pause
 )
 
 REM Build React app if needed

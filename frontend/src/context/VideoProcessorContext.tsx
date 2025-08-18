@@ -80,7 +80,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
   });
 
   // Socket connection
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [, setSocket] = useState<Socket | null>(null);
 
   // Initialize socket connection with retry logic
   useEffect(() => {
@@ -164,7 +164,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     };
 
     // Initialize socket with delay
-    const socket = initSocket();
+    initSocket();
 
     // Cleanup function
     return () => {

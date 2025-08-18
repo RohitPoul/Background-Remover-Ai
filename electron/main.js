@@ -83,12 +83,18 @@ function startPythonServer() {
   // Check if FFMPEG exists
   const ffmpegPath = path.join(process.cwd(), 'bin', 'ffmpeg.exe');
   if (!fs.existsSync(ffmpegPath)) {
-    console.error(`FFMPEG not found at ${ffmpegPath}`);
-    dialog.showErrorBox(
-      'FFMPEG Not Found',
-      `FFMPEG is required for video processing but was not found at ${ffmpegPath}.\n\nPlease run "npm run download-ffmpeg" to download it.`
-    );
-    app.quit();
+    console.warn(`FFMPEG not found at ${ffmpegPath}`);
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'FFMPEG Not Found',
+      message: 'FFMPEG is required for video processing',
+      detail: `FFMPEG was not found at ${ffmpegPath}.\n\nPlease download FFMPEG from https://www.gyan.dev/ffmpeg/builds/ and place ffmpeg.exe in the bin directory.\n\nThe application will continue but video processing won't work without FFMPEG.`,
+      buttons: ['Continue', 'Exit']
+    }).then((result) => {
+      if (result.response === 1) {
+        app.quit();
+      }
+    });
     return;
   }
   

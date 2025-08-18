@@ -7,7 +7,6 @@ import {
   FormControlLabel,
   Switch,
   Collapse,
-  IconButton,
   Tooltip,
   Divider,
   Chip,
