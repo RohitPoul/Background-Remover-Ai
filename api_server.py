@@ -90,8 +90,9 @@ def check_memory_available():
         memory = psutil.virtual_memory()
         available_gb = memory.available / (1024 ** 3)
         print(f"Available memory: {available_gb:.2f} GB")
-        # Require at least 4GB free memory to load models
-        return available_gb >= 4.0
+        # Require at least 2GB free memory to load lite models (more reasonable)
+        # BiRefNet_lite should work with 2-3GB available memory
+        return available_gb >= 2.0
     except Exception as e:
         print(f"Error checking memory: {e}")
         return True  # Assume it's OK if we can't check
@@ -769,6 +770,25 @@ def test_endpoint():
         'message': 'Server is responding',
         'models_available': models_available,
         'models_loaded': models_loaded
+    })
+
+@app.route('/api/reset_models', methods=['POST'])
+def reset_models():
+    """Reset model availability flag and try loading again"""
+    global models_available, models_loaded
+    
+    # Reset flags
+    models_available = True
+    models_loaded = False
+    
+    # Try to load models
+    success = load_models_if_needed()
+    
+    return jsonify({
+        'status': 'success' if success else 'failed',
+        'models_available': models_available,
+        'models_loaded': models_loaded,
+        'message': 'Models reset and load attempted'
     })
 
 @socketio.on('connect')
