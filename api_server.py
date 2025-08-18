@@ -621,13 +621,21 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
 @app.route('/api/process_video', methods=['POST'])
 def process_video():
     try:
+        print("Processing video request received...")
+        
         # Check if models are available
         if not models_available:
+            print("ERROR: Models not available")
             return jsonify({'error': 'AI models are not available due to system constraints. Please restart the application or increase virtual memory.'}), 503
+        
+        print("Models are available, attempting to load...")
         
         # Load models if needed
         if not load_models_if_needed():
+            print("ERROR: Failed to load models")
             return jsonify({'error': 'Failed to load AI models. Please restart the application or increase virtual memory.'}), 503
+            
+        print("Models loaded successfully, proceeding with video processing...")
             
         session_id = str(uuid.uuid4())
         active_sessions[session_id] = True
@@ -753,7 +761,15 @@ def health_check():
             'error': str(e)
         })
 
-
+@app.route('/api/test', methods=['GET'])
+def test_endpoint():
+    """Simple test endpoint to verify server is responding"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Server is responding',
+        'models_available': models_available,
+        'models_loaded': models_loaded
+    })
 
 @socketio.on('connect')
 def handle_connect():
