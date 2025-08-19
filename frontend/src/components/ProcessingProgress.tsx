@@ -13,7 +13,7 @@ import {
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 export default function ProcessingProgress() {
-  const { progress, elapsedTime, currentFrame, totalFrames } = useVideoProcessor();
+  const { progress, elapsedTime, currentFrame, totalFrames, statusMessage } = useVideoProcessor();
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -175,7 +175,7 @@ export default function ProcessingProgress() {
           }}
         />
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          AI is processing your video with background removal...
+          {statusMessage || 'AI is processing your video with background removal...'}
         </Typography>
       </Box>
     </Paper>

@@ -24,7 +24,7 @@ import {
 import VideoUpload from './VideoUpload';
 import BackgroundSettings from './BackgroundSettings';
 import ProcessingControls from './ProcessingControls';
-import VideoPreview from './VideoPreview';
+import DualVideoPreview from './DualVideoPreview';
 import ProcessingProgress from './ProcessingProgress';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
@@ -234,6 +234,7 @@ export default function VideoProcessor() {
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
+                    gap: 0,
                   }}
                 >
                   {/* Preview Header */}
@@ -281,19 +282,12 @@ export default function VideoProcessor() {
                   </Box>
 
                   {/* Video Preview Content */}
-                  <Box sx={{ flexGrow: 1, position: 'relative' }}>
-                    <VideoPreview />
+                  <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <Box sx={{ flex: 1, minHeight: 0 }}>
+                      <DualVideoPreview />
+                    </Box>
                     {(processingStatus === 'processing' || processingStatus === 'started') && (
-                      <Box
-                        sx={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          p: 2,
-                          background: 'linear-gradient(to top, rgba(26, 31, 58, 0.95), transparent)',
-                        }}
-                      >
+                      <Box sx={{ p: 2 }}>
                         <ProcessingProgress />
                       </Box>
                     )}

@@ -103,7 +103,7 @@ export default function ProcessingControls() {
             size="large"
             startIcon={<PlayIcon />}
             onClick={startProcessing}
-            disabled={!uploadedVideo}
+            disabled={!uploadedVideo || isProcessing}
             sx={{
               py: 2,
               background: uploadedVideo

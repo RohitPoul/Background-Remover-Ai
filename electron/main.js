@@ -25,8 +25,8 @@ const store = new Store();
 let mainWindow;
 let pythonProcess;
 
-// Force production UI (always load built React app inside Electron)
-const isDev = false;
+// Dev mode: when running via `npm run dev` we set ELECTRON_DEV=true
+const isDev = process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV === 'development';
 
 function createWindow() {
   // Create the browser window
@@ -54,10 +54,19 @@ function createWindow() {
     }
   } catch {}
 
-  // Load the app with proper base URL for resources
-  mainWindow.loadFile(path.join(__dirname, '../frontend/build/index.html'));
+  // Load UI
+  if (isDev) {
+    // In dev, use CRA dev server for instant reloads
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.once('did-frame-finish-load', () => {
+      try { mainWindow.webContents.openDevTools({ mode: 'detach' }); } catch {}
+    });
+  } else {
+    // In prod, use built files
+    mainWindow.loadFile(path.join(__dirname, '../frontend/build/index.html'));
+  }
   
-  // No base-tag injection needed; paths are relative via homepage ./ in frontend/package.json
+  // No base-tag injection needed in prod; paths are relative via homepage ./ in frontend/package.json
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {

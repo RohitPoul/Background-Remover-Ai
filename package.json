@@ -5,9 +5,10 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "npm run build:react && npx electron .",
-    "dev": "concurrently \"npm run dev:python\" \"npm run dev:electron\"",
+    "dev": "concurrently \"npm run dev:python\" \"npm run dev:ui\" \"npm run dev:electron\"",
     "dev:python": "python api_server.py",
-    "dev:electron": "wait-on http://localhost:5000 && npx electron .",
+    "dev:ui": "cd frontend && set BROWSER=none&& npm start",
+    "dev:electron": "cross-env ELECTRON_DEV=true wait-on http://localhost:5000 http://localhost:3000 && npx electron .",
     "build": "cd frontend && npm run build && electron-builder",
     "build:react": "cd frontend && npm run build",
     "pack": "electron-builder --dir",

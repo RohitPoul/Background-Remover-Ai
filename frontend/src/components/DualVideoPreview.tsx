@@ -1,0 +1,147 @@
+import React, { useEffect, useRef } from 'react';
+import { Box, Typography, Paper, Fade, CircularProgress, Chip, Grid } from '@mui/material';
+import { CheckCircle as CheckIcon } from '@mui/icons-material';
+import { useVideoProcessor } from '../context/VideoProcessorContext';
+
+export default function DualVideoPreview() {
+  const {
+    uploadedVideo,
+    previewImage,
+    processingStatus,
+    outputFile,
+    progress,
+    currentFrame,
+    totalFrames,
+  } = useVideoProcessor();
+
+  const originalVideoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (uploadedVideo && originalVideoRef.current) {
+      const url = URL.createObjectURL(uploadedVideo);
+      originalVideoRef.current.src = url;
+      originalVideoRef.current.play().catch(() => {});
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [uploadedVideo]);
+
+  const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+  const processedUrl = outputFile ? `${API_BASE}${outputFile}` : '';
+
+  const Header = () => {
+    if (processingStatus === 'processing' || processingStatus === 'started') {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <CircularProgress size={20} sx={{ color: 'warning.main' }} />
+          <Typography variant="body2" sx={{ fontWeight: 600, color: 'warning.main' }}>
+            Processing Frame {currentFrame} of {totalFrames}
+          </Typography>
+          <Chip label={`${progress.toFixed(1)}%`} color="warning" size="small" sx={{ ml: 'auto', fontWeight: 600 }} />
+        </Box>
+      );
+    }
+    if (processingStatus === 'completed' && processedUrl) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Chip icon={<CheckIcon />} label="Processing Complete" color="success" sx={{ fontWeight: 600 }} />
+          <Typography variant="caption" sx={{ ml: 'auto', color: 'text.secondary' }}>
+            Use the download button below to save your video
+          </Typography>
+        </Box>
+      );
+    }
+    if (uploadedVideo) {
+      return (
+        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+          Video Preview - Ready to Process
+        </Typography>
+      );
+    }
+    return null;
+  };
+
+  // Always render a dual layout to avoid confusion and ensure visibility
+  if (!uploadedVideo && processingStatus === 'idle') {
+    return (
+      <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 2 }}>
+        <Typography variant="h6" sx={{ color: 'text.secondary', opacity: 0.5 }}>
+          Video Preview
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', opacity: 0.3 }}>
+          Upload a video to see preview
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Fade in timeout={500}>
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
+        <Header />
+        <Grid container spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+          {/* Original */}
+          <Grid item xs={6} sx={{ minHeight: 0 }}>
+            <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
+                Original
+              </Typography>
+              {uploadedVideo ? (
+                <video ref={originalVideoRef} muted={processingStatus !== 'completed'} loop autoPlay controls={processingStatus !== 'processing'}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
+              ) : (
+                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>No video loaded</Typography>
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Processed / Live Preview */}
+          <Grid item xs={6} sx={{ minHeight: 0 }}>
+            <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+              <Typography
+                variant="caption"
+                sx={{ color: processingStatus === 'completed' ? 'success.main' : processingStatus === 'processing' ? 'warning.main' : 'text.secondary', mb: 1, display: 'block' }}
+              >
+                {processingStatus === 'completed' ? 'Processed' : processingStatus === 'processing' ? 'Live Preview' : 'Output'}
+              </Typography>
+
+              {processingStatus === 'completed' && processedUrl && (
+                <video
+                  src={processedUrl}
+                  controls
+                  autoPlay
+                  loop
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }}
+                />
+              )}
+
+              {processingStatus === 'processing' && (
+                previewImage ? (
+                  <img src={previewImage} alt="Processing preview" style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
+                ) : (
+                  <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CircularProgress />
+                  </Box>
+                )
+              )}
+
+              {processingStatus === 'idle' && (
+                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>No output yet</Typography>
+                </Box>
+              )}
+
+              {processingStatus === 'processing' && (
+                <Paper sx={{ position: 'absolute', top: 32, right: 8, px: 1.5, py: 0.5, background: 'rgba(255, 152, 0, 0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'white', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.3 }, '100%': { opacity: 1 } } }} />
+                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'white' }}>LIVE</Typography>
+                </Paper>
+              )}
+            </Paper>
+          </Grid>
+        </Grid>
+      </Box>
+    </Fade>
+  );
+}

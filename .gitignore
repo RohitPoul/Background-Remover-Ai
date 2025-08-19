@@ -1,22 +1,54 @@
-# Dependencies
-node_modules/
-*/node_modules/
-
-# Build outputs
-frontend/build/
-frontend/dist/
-
-# Cache directories
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-model_cache/
+env/
+venv/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Log files
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build directories
+frontend/build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
 logs/
 *.log
+
+# Model cache
+model_cache/
+
+# Temporary output files
+temp_output_*.mp4
+temp_output_*.webm
+temp_output_*.mov
+*.processed.mp4
+*.processed.webm
+*.processed.mov
+
+# Binary files
+bin/
 
 # Environment variables
 .env
@@ -25,38 +57,5 @@ logs/
 .env.test.local
 .env.production.local
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# FFmpeg binaries (downloaded as needed)
-bin/
-
-# Example/test files
-*.mp4
-*.webp
-*.mov
-*.avi
-test_*
-example_*
-
-# Python virtual environment
-venv/
-env/
-ENV/
-
-# Temporary files
-temp/
-tmp/
-*.tmp
+# Electron
+electron-builder.yml

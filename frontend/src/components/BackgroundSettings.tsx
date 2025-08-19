@@ -71,7 +71,11 @@ export default function BackgroundSettings() {
     setBackgroundVideo,
     videoHandling,
     setVideoHandling,
+    processingStatus,
   } = useVideoProcessor();
+  
+  // Disable all controls during processing
+  const isProcessing = processingStatus === 'processing' || processingStatus === 'started';
 
 
 
@@ -106,11 +110,12 @@ export default function BackgroundSettings() {
         {backgroundOptions.map((option) => (
           <Tooltip key={option.value} title={option.description} placement="top">
             <Paper
-              onClick={() => setBackgroundType(option.value as any)}
+              onClick={() => !isProcessing && setBackgroundType(option.value as any)}
               sx={{
                 p: 1.5,
-                cursor: 'pointer',
+                cursor: isProcessing ? 'not-allowed' : 'pointer',
                 textAlign: 'center',
+                opacity: isProcessing ? 0.5 : 1,
                 border: backgroundType === option.value 
                   ? '2px solid #00b4d8' 
                   : '1px solid rgba(0, 180, 216, 0.3)',
@@ -118,10 +123,10 @@ export default function BackgroundSettings() {
                   ? 'linear-gradient(135deg, rgba(0, 180, 216, 0.2) 0%, rgba(0, 119, 182, 0.1) 100%)'
                   : 'transparent',
                 transition: 'all 0.3s ease',
-                '&:hover': {
+                '&:hover': !isProcessing ? {
                   borderColor: 'rgba(0, 180, 216, 0.5)',
                   background: 'rgba(0, 180, 216, 0.05)',
-                },
+                } : {},
               }}
             >
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
