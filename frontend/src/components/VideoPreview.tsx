@@ -6,6 +6,7 @@ import {
   IconButton,
   Fade,
   CircularProgress,
+  Button,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -13,6 +14,7 @@ import {
   VolumeUp as VolumeIcon,
   VolumeOff as VolumeOffIcon,
   Fullscreen as FullscreenIcon,
+  Download as DownloadIcon,
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
@@ -22,6 +24,7 @@ export default function VideoPreview() {
     previewImage,
     processingStatus,
     outputFile,
+    downloadVideo,
   } = useVideoProcessor();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -86,6 +89,34 @@ export default function VideoPreview() {
           }}
           src={outputFile}
         />
+        
+        {/* Download Button Overlay */}
+        <Paper
+          sx={{
+            position: 'absolute',
+            top: 16,
+            right: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            px: 2,
+            py: 1,
+            background: 'rgba(26, 31, 58, 0.9)',
+            backdropFilter: 'blur(10px)',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              background: 'rgba(74, 222, 128, 0.2)',
+              transform: 'scale(1.05)',
+            },
+          }}
+          onClick={downloadVideo}
+        >
+          <DownloadIcon sx={{ color: 'success.main' }} />
+          <Typography variant="body2" sx={{ fontWeight: 600, color: 'success.main' }}>
+            Download Video
+          </Typography>
+        </Paper>
       </Box>
     );
   }

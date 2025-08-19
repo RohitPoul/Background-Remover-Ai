@@ -41,13 +41,9 @@ if not os.path.exists(ffmpeg_path):
 else:
     print(f"Found ffmpeg at {ffmpeg_path}")
 
-from moviepy import VideoFileClip, vfx, concatenate_videoclips, ImageSequenceClip
 import io
 import base64
 import json
-from werkzeug.utils import secure_filename
-from flask_socketio import SocketIO, emit
-import threading
 import multiprocessing
 import signal
 import atexit
@@ -60,9 +56,11 @@ allowed_origins_env = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,h
 allowed_origins = [origin.strip() for origin in allowed_origins_env.split(',') if origin.strip()]
 CORS(app, origins=allowed_origins)
 # Allow all origins for SocketIO to support Electron's file:// origin
+# Use polling transport only for better stability
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading', 
-                   transports=['polling', 'websocket'], 
-                   ping_timeout=60, ping_interval=25)
+                   transports=['polling'], # Polling only for stability
+                   ping_timeout=60, ping_interval=25,
+                   allow_upgrades=False) # Prevent WebSocket upgrade issues
 
 # Optimize memory usage
 torch.set_float32_matmul_precision("medium")
@@ -955,6 +953,7 @@ def root():
         'message': 'Video Background Removal API is running'
     })
 
+@app.route('/health')
 @app.route('/api/health')
 def health_check():
     # Check system resources

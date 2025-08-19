@@ -26,7 +26,6 @@ import BackgroundSettings from './BackgroundSettings';
 import ProcessingControls from './ProcessingControls';
 import VideoPreview from './VideoPreview';
 import ProcessingProgress from './ProcessingProgress';
-import ExampleVideos from './ExampleVideos';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 const steps = [
@@ -118,22 +117,6 @@ export default function VideoProcessor() {
           </Stepper>
         </CardContent>
       </Card>
-
-      {/* Examples Section */}
-      <Fade in timeout={400}>
-        <Card
-          sx={{
-            mb: 4,
-            background: 'rgba(26, 31, 58, 0.6)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(0, 180, 216, 0.2)',
-          }}
-        >
-          <CardContent>
-            <ExampleVideos />
-          </CardContent>
-        </Card>
-      </Fade>
 
       <Grid container spacing={3}>
         {/* Left Panel - Upload and Settings */}

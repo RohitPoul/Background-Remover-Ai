@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 // Types
@@ -79,42 +79,61 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     outputFormat: 'mp4',
   });
 
-  // Socket connection
-  const [, setSocket] = useState<Socket | null>(null);
+  // Socket connection - store as ref to prevent re-creation
+  const socketRef = useRef<Socket | null>(null);
+  const isConnecting = useRef<boolean>(false);
 
   // Initialize socket connection with retry logic
   useEffect(() => {
+    // Prevent duplicate initialization
+    if (socketRef.current || isConnecting.current) {
+      return;
+    }
+    
+    isConnecting.current = true;
     const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
-    let currentSocket: Socket | null = null;
-    let timeoutId: NodeJS.Timeout | null = null;
+    let connectionAttempts = 0;
     
     const initSocket = () => {
+      // Create socket with polling-only transport to avoid WebSocket issues
       const newSocket = io(API_BASE, {
-        reconnectionAttempts: 10,
+        reconnection: true,
+        reconnectionAttempts: 5,
         reconnectionDelay: 2000,
-        timeout: 15000,
-        autoConnect: false, // Don't connect immediately
+        reconnectionDelayMax: 10000,
+        timeout: 20000,
+        autoConnect: false,
+        transports: ['polling'], // Use polling only to avoid WebSocket frame issues
+        upgrade: false, // Disable transport upgrade
       });
 
       newSocket.on('connect', () => {
         console.log('Connected to Python server');
+        connectionAttempts = 0;
         setState(prev => ({ ...prev, connectionError: null }));
       });
 
       newSocket.on('connect_error', (err) => {
-        console.log('Connection error:', err);
-        setState(prev => ({ 
-          ...prev, 
-          connectionError: 'Waiting for Python server to start...' 
-        }));
+        connectionAttempts++;
+        // Only show error after 3 attempts to avoid showing transient errors
+        if (connectionAttempts > 3) {
+          console.log('Connection error after', connectionAttempts, 'attempts:', err.message);
+          setState(prev => ({ 
+            ...prev, 
+            connectionError: 'Waiting for Python server to start...' 
+          }));
+        }
       });
 
-      newSocket.on('disconnect', () => {
-        console.log('Disconnected from server');
-        setState(prev => ({ 
-          ...prev, 
-          connectionError: 'Connection lost. Attempting to reconnect...' 
-        }));
+      newSocket.on('disconnect', (reason) => {
+        console.log('Disconnected from server:', reason);
+        // Only show error if it's not a normal disconnect
+        if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
+          setState(prev => ({ 
+            ...prev, 
+            connectionError: 'Connection lost. Attempting to reconnect...' 
+          }));
+        }
       });
 
       newSocket.on('processing_update', (data) => {
@@ -152,30 +171,38 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      setSocket(newSocket);
-      currentSocket = newSocket;
+      socketRef.current = newSocket;
       
-      // Try to connect after a delay to allow Python server to start
-      timeoutId = setTimeout(() => {
-        newSocket.connect();
-      }, 3000);
+      // Simple connection with delay
+      const connectWithDelay = () => {
+        // Try to connect after a short delay
+        setTimeout(() => {
+          if (!newSocket.connected) {
+            console.log('Attempting to connect to server...');
+            newSocket.connect();
+          }
+        }, 1500);
+      };
+      
+      connectWithDelay();
 
       return newSocket;
     };
 
-    // Initialize socket with delay
+    // Initialize socket
     initSocket();
 
     // Cleanup function
     return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      if (currentSocket) {
-        currentSocket.disconnect();
+      isConnecting.current = false;
+      if (socketRef.current) {
+        console.log('Cleaning up socket connection');
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
-  }, [state.sessionId]);
+  }, []); // Empty dependency to run only once
 
   // Setters
   const setUploadedVideo = useCallback((file: File | null) => {
@@ -314,9 +341,16 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     if (state.outputFile) {
       const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
       const fullUrl = `${API_BASE}${state.outputFile}`;
-      window.open(fullUrl, '_blank');
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a');
+      link.href = fullUrl;
+      link.download = `processed_video_${Date.now()}.${state.outputFormat || 'mp4'}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
-  }, [state.outputFile]);
+  }, [state.outputFile, state.outputFormat]);
 
   const resetState = useCallback(() => {
     setState(prev => ({
