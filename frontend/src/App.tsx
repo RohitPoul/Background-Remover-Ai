@@ -1,10 +1,12 @@
 import React from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { Box } from '@mui/material';
+import { Box, Fab, Tooltip } from '@mui/material';
+import { BugReport as BugIcon } from '@mui/icons-material';
 import VideoProcessor from './components/VideoProcessor';
 import Header from './components/Header';
-import { VideoProcessorProvider } from './context/VideoProcessorContext';
+import DebugPanel from './components/DebugPanel';
+import { VideoProcessorProvider, useVideoProcessor } from './context/VideoProcessorContext';
 import './App.css';
 
 const darkTheme = createTheme({
@@ -90,39 +92,65 @@ const darkTheme = createTheme({
   },
 });
 
+// App content with access to context
+const AppContent = () => {
+  const { toggleDebugPanel, showDebugPanel } = useVideoProcessor();
+  
+  return (
+    <Box
+      sx={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 25%, #0a0e27 50%, #1a1f3a 75%, #0a0e27 100%)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Background decoration */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: `
+            radial-gradient(circle at 20% 20%, rgba(0, 180, 216, 0.15) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(0, 245, 255, 0.1) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(72, 202, 228, 0.05) 0%, transparent 60%)
+          `,
+          pointerEvents: 'none',
+        }}
+      />
+      
+      <Header />
+      <VideoProcessor />
+      
+      {/* Debug Panel */}
+      <DebugPanel />
+      
+      {/* Debug Toggle Button (only show when debug panel is hidden) */}
+      {!showDebugPanel && (
+        <Tooltip title="Show Debug Console">
+          <Fab 
+            size="small" 
+            color="primary" 
+            onClick={toggleDebugPanel}
+            sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 9999 }}
+          >
+            <BugIcon />
+          </Fab>
+        </Tooltip>
+      )}
+    </Box>
+  );
+};
+
 function App() {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
       <VideoProcessorProvider>
-        <Box
-          sx={{
-            minHeight: '100vh',
-            background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 25%, #0a0e27 50%, #1a1f3a 75%, #0a0e27 100%)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Background decoration */}
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: `
-                radial-gradient(circle at 20% 20%, rgba(0, 180, 216, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 80% 80%, rgba(0, 245, 255, 0.1) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(72, 202, 228, 0.05) 0%, transparent 60%)
-              `,
-              pointerEvents: 'none',
-            }}
-          />
-          
-          <Header />
-          <VideoProcessor />
-        </Box>
+        <AppContent />
       </VideoProcessorProvider>
     </ThemeProvider>
   );

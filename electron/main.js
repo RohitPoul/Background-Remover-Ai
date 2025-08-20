@@ -239,3 +239,49 @@ ipcMain.handle('close-window', () => {
     mainWindow.close();
   }
 });
+
+// Cleanup function for temp files
+function cleanupTempFiles() {
+  console.log('Cleaning up temporary files...');
+  const glob = require('glob');
+  const patterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov', 'temp_video_*.mp4', 'input_*.mp4', 'bg_*.*'];
+  
+  patterns.forEach(pattern => {
+    glob.sync(pattern).forEach(file => {
+      try {
+        fs.unlinkSync(file);
+        console.log(`Deleted: ${file}`);
+      } catch (err) {
+        console.error(`Failed to delete ${file}:`, err);
+      }
+    });
+  });
+}
+
+// Clean up when app is closing
+app.on('before-quit', (event) => {
+  console.log('App is quitting, cleaning up...');
+  
+  // Stop Python server
+  if (pythonProcess) {
+    console.log('Stopping Python server...');
+    pythonProcess.kill();
+    pythonProcess = null;
+  }
+  
+  // Clean up temp files
+  cleanupTempFiles();
+});
+
+app.on('window-all-closed', () => {
+  // Clean up before quitting
+  if (pythonProcess) {
+    pythonProcess.kill();
+    pythonProcess = null;
+  }
+  cleanupTempFiles();
+  
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
