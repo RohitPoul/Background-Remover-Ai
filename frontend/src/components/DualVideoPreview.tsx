@@ -3,7 +3,7 @@ import { Box, Typography, Paper, Fade, CircularProgress, Chip, Grid, Button, But
 import { 
   CheckCircle as CheckIcon, 
   Download as DownloadIcon,
-  Save as SaveIcon
+
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
@@ -14,7 +14,7 @@ export default function DualVideoPreview() {
     processingStatus,
     outputFile,
     downloadVideo,
-    downloadVideoDirectly,
+
     progress,
     currentFrame,
     totalFrames,
@@ -62,35 +62,20 @@ export default function DualVideoPreview() {
             </Typography>
           )}
           
-          <ButtonGroup variant="contained" size="small" sx={{ ml: 'auto' }}>
-            <Tooltip title="Standard download">
-              <Button
-                startIcon={<DownloadIcon />}
-                onClick={() => {
-                  setDownloadAttempts(prev => prev + 1);
-                  downloadVideo();
-                }}
-                color="primary"
-                data-debug-label="download-standard"
-              >
-                Download
-              </Button>
-            </Tooltip>
-            
-            <Tooltip title="Alternative download method">
-              <Button
-                startIcon={<SaveIcon />}
-                onClick={() => {
-                  setDownloadAttempts(prev => prev + 1);
-                  downloadVideoDirectly();
-                }}
-                color="secondary"
-                data-debug-label="download-direct"
-              >
-                Direct
-              </Button>
-            </Tooltip>
-          </ButtonGroup>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<DownloadIcon />}
+            onClick={() => {
+              setDownloadAttempts(prev => prev + 1);
+              downloadVideo();
+            }}
+            color="primary"
+            data-debug-label="download-video"
+            sx={{ ml: 'auto' }}
+          >
+            Download
+          </Button>
         </Box>
       );
     }

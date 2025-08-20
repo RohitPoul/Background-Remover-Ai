@@ -58,7 +58,7 @@ interface VideoProcessorContextType extends VideoProcessorState {
   startProcessing: () => void;
   cancelProcessing: () => void;
   downloadVideo: () => void;
-  downloadVideoDirectly: () => void; // New direct download method
+
   resetState: () => void;
   toggleDebugPanel: () => void; // Toggle debug panel
   clearDebugLogs: () => void; // Clear debug logs
@@ -765,7 +765,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     startProcessing,
     cancelProcessing,
     downloadVideo,
-    downloadVideoDirectly,
+
     resetState,
     toggleDebugPanel,
     clearDebugLogs,

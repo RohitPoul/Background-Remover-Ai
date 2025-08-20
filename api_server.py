@@ -900,8 +900,9 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 debug_log(f"[{session_id}] Format: {output_ext.upper()}", session_id)
                 debug_log(f"[{session_id}] File size: {file_size} bytes ({file_size_mb:.2f} MB)", session_id)
                 debug_log(f"[{session_id}] Location: {abs_output_path}", session_id)
-                # Track output file for cleanup
-                temp_files.add(abs_output_path)
+                # DO NOT track output file for cleanup - keep for download
+                # temp_files.add(abs_output_path)  # Commented out to prevent premature deletion
+                debug_log(f"[{session_id}] Output file preserved for download (not tracked for cleanup)", session_id)
             else:
                 debug_log(f"[{session_id}] ERROR: Output file was not created!", session_id)
                 debug_log(f"[{session_id}] Expected location: {abs_output_path}", session_id)
@@ -923,8 +924,9 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 debug_log(f"[{session_id}] Fallback video saved successfully!", session_id)
                 # Track output file for cleanup
                 if os.path.exists(abs_output_path):
-                    temp_files.add(abs_output_path)
-                    debug_log(f"[{session_id}] File tracked for cleanup", session_id)
+                    # DO NOT track output file for cleanup - keep for download
+                    # temp_files.add(abs_output_path)  # Commented out to prevent premature deletion
+                    debug_log(f"[{session_id}] Fallback output file preserved for download", session_id)
             except Exception as fallback_error:
                 debug_log(f"[{session_id}] CRITICAL: Fallback also failed: {fallback_error}", session_id)
                 import traceback
