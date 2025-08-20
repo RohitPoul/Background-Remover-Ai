@@ -14,6 +14,7 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Alert,
+  ButtonGroup,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -26,6 +27,8 @@ import {
   AutoAwesome as AIIcon,
   Tune as TuneIcon,
   VideoFile as VideoFileIcon,
+  Save as SaveIcon,
+  CloudDownload as CloudDownloadIcon,
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
@@ -46,6 +49,7 @@ export default function ProcessingControls() {
     startProcessing,
     cancelProcessing,
     downloadVideo,
+    downloadVideoDirectly,
   } = useVideoProcessor();
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -57,26 +61,50 @@ export default function ProcessingControls() {
       {/* Main Controls */}
       <Box sx={{ mb: 3 }}>
         {processingStatus === 'completed' && outputFile ? (
-          <Button
-            fullWidth
-            variant="contained"
-            size="large"
-            startIcon={<DownloadIcon />}
-            onClick={downloadVideo}
-            sx={{
-              py: 2,
-              background: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
-              fontSize: '1.1rem',
-              fontWeight: 600,
-              boxShadow: '0 4px 20px rgba(74, 222, 128, 0.3)',
-              '&:hover': {
-                background: 'linear-gradient(135deg, #4ade80 20%, #16a34a 120%)',
-                boxShadow: '0 6px 30px rgba(74, 222, 128, 0.4)',
-              },
-            }}
-          >
-            Download Processed Video
-          </Button>
+          <Box sx={{ width: '100%' }}>
+            <Typography variant="body2" sx={{ mb: 1, textAlign: 'center', color: 'text.secondary' }}>
+              Choose a download method:
+            </Typography>
+            <ButtonGroup fullWidth variant="contained" size="large" sx={{ mb: 1 }}>
+              <Button
+                startIcon={<DownloadIcon />}
+                onClick={downloadVideo}
+                sx={{
+                  py: 2,
+                  background: 'linear-gradient(135deg, #4ade80 0%, #16a34a 100%)',
+                  fontSize: '1.1rem',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 20px rgba(74, 222, 128, 0.3)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #4ade80 20%, #16a34a 120%)',
+                    boxShadow: '0 6px 30px rgba(74, 222, 128, 0.4)',
+                  },
+                }}
+              >
+                Standard Download
+              </Button>
+              <Button
+                startIcon={<SaveIcon />}
+                onClick={downloadVideoDirectly}
+                sx={{
+                  py: 2,
+                  background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  fontSize: '1.1rem',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 20px rgba(99, 102, 241, 0.3)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #6366f1 20%, #4f46e5 120%)',
+                    boxShadow: '0 6px 30px rgba(99, 102, 241, 0.4)',
+                  },
+                }}
+              >
+                Direct Download
+              </Button>
+            </ButtonGroup>
+            <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', color: 'text.secondary' }}>
+              If one method doesn't work, try the other
+            </Typography>
+          </Box>
         ) : isProcessing ? (
           <Button
             fullWidth
@@ -84,6 +112,7 @@ export default function ProcessingControls() {
             size="large"
             startIcon={<StopIcon />}
             onClick={cancelProcessing}
+            data-debug-label="cancel-processing"
             sx={{
               py: 2,
               background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
@@ -104,6 +133,7 @@ export default function ProcessingControls() {
             startIcon={<PlayIcon />}
             onClick={startProcessing}
             disabled={!uploadedVideo || isProcessing}
+            data-debug-label="start-processing"
             sx={{
               py: 2,
               background: uploadedVideo

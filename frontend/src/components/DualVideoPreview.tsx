@@ -1,6 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { Box, Typography, Paper, Fade, CircularProgress, Chip, Grid } from '@mui/material';
-import { CheckCircle as CheckIcon } from '@mui/icons-material';
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Typography, Paper, Fade, CircularProgress, Chip, Grid, Button, ButtonGroup, Tooltip } from '@mui/material';
+import { 
+  CheckCircle as CheckIcon, 
+  Download as DownloadIcon,
+  Save as SaveIcon
+} from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 export default function DualVideoPreview() {
@@ -9,10 +13,16 @@ export default function DualVideoPreview() {
     previewImage,
     processingStatus,
     outputFile,
+    downloadVideo,
+    downloadVideoDirectly,
     progress,
     currentFrame,
     totalFrames,
+    debugInfo,
   } = useVideoProcessor();
+  
+  // Track download attempts for debugging
+  const [downloadAttempts, setDownloadAttempts] = useState(0);
 
   const originalVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -44,9 +54,43 @@ export default function DualVideoPreview() {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Chip icon={<CheckIcon />} label="Processing Complete" color="success" sx={{ fontWeight: 600 }} />
-          <Typography variant="caption" sx={{ ml: 'auto', color: 'text.secondary' }}>
-            Use the download button below to save your video
-          </Typography>
+          
+          {/* Debug info display */}
+          {downloadAttempts > 0 && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              Attempts: {downloadAttempts}
+            </Typography>
+          )}
+          
+          <ButtonGroup variant="contained" size="small" sx={{ ml: 'auto' }}>
+            <Tooltip title="Standard download">
+              <Button
+                startIcon={<DownloadIcon />}
+                onClick={() => {
+                  setDownloadAttempts(prev => prev + 1);
+                  downloadVideo();
+                }}
+                color="primary"
+                data-debug-label="download-standard"
+              >
+                Download
+              </Button>
+            </Tooltip>
+            
+            <Tooltip title="Alternative download method">
+              <Button
+                startIcon={<SaveIcon />}
+                onClick={() => {
+                  setDownloadAttempts(prev => prev + 1);
+                  downloadVideoDirectly();
+                }}
+                color="secondary"
+                data-debug-label="download-direct"
+              >
+                Direct
+              </Button>
+            </Tooltip>
+          </ButtonGroup>
         </Box>
       );
     }
