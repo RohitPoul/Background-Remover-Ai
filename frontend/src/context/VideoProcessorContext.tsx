@@ -2,6 +2,12 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { io, Socket } from 'socket.io-client';
 
 // Types
+interface DebugLogEntry {
+  message: string;
+  timestamp: number;
+  sessionId: string;
+}
+
 interface VideoProcessorState {
   // Upload state
   uploadedVideo: File | null;
@@ -16,6 +22,9 @@ interface VideoProcessorState {
   previewImage: string | null;
   outputFile: string | null;
   statusMessage: string | null;
+  debugInfo?: any; // Debug information from backend
+  debugLogs: DebugLogEntry[]; // Debug logs from backend
+  showDebugPanel: boolean; // Whether to show debug panel
   
   // Connection state
   connectionError: string | null;
@@ -49,11 +58,17 @@ interface VideoProcessorContextType extends VideoProcessorState {
   startProcessing: () => void;
   cancelProcessing: () => void;
   downloadVideo: () => void;
+  downloadVideoDirectly: () => void; // New direct download method
   resetState: () => void;
+  toggleDebugPanel: () => void; // Toggle debug panel
+  clearDebugLogs: () => void; // Clear debug logs
 }
 
 // Context
 const VideoProcessorContext = createContext<VideoProcessorContextType | undefined>(undefined);
+
+// Export context directly
+export { VideoProcessorContext };
 
 // Provider
 export function VideoProcessorProvider({ children }: { children: ReactNode }) {
@@ -79,6 +94,8 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     fastMode: true,
     maxWorkers: 2,
     outputFormat: 'mp4',
+    debugLogs: [],
+    showDebugPanel: true, // Show debug panel by default
   });
 
   // Socket connection - store as ref to prevent re-creation
@@ -89,9 +106,37 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
 
   // Keep ref in sync with state
   useEffect(() => {
+    console.log('🔄 UPDATING SESSION ID REF:', state.sessionId);
     sessionIdRef.current = state.sessionId;
   }, [state.sessionId]);
 
+  // Add global click handler for debugging
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const button = target.closest('button');
+      if (button) {
+        // Prefer a stable debug label if provided
+        const debugLabel = button.getAttribute('data-debug-label');
+        const buttonText = debugLabel || button.getAttribute('aria-label') || button.innerText || 'Unknown button';
+        setState(prev => ({
+          ...prev,
+          debugLogs: [
+            ...prev.debugLogs,
+            {
+              message: `🖱️ [UI] Button clicked: "${buttonText}"`,
+              timestamp: Date.now() / 1000,
+              sessionId: 'frontend'
+            }
+          ].slice(-100)
+        }));
+      }
+    };
+    
+    document.addEventListener('click', handleGlobalClick);
+    return () => document.removeEventListener('click', handleGlobalClick);
+  }, []);
+  
   // Initialize socket connection with retry logic
   useEffect(() => {
     // Prevent duplicate initialization
@@ -119,7 +164,18 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       newSocket.on('connect', () => {
         console.log('Connected to Python server');
         connectionAttempts = 0;
-        setState(prev => ({ ...prev, connectionError: null }));
+        setState(prev => ({ 
+          ...prev, 
+          connectionError: null,
+          debugLogs: [
+            ...prev.debugLogs,
+            {
+              message: '✅ Connected to Python backend server',
+              timestamp: Date.now() / 1000,
+              sessionId: 'frontend'
+            }
+          ].slice(-100)
+        }));
       });
 
       newSocket.on('connect_error', (err) => {
@@ -160,13 +216,34 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       });
 
       newSocket.on('processing_complete', (data) => {
-        if (data?.session_id !== sessionIdRef.current) return;
+        console.log('🎉 PROCESSING_COMPLETE EVENT RECEIVED:', data);
+        console.log('📋 Session ID from server:', data?.session_id);
+        console.log('📋 Current session ID ref:', sessionIdRef.current);
+        console.log('🔍 Session IDs match:', data?.session_id === sessionIdRef.current);
+        
+        if (data?.session_id !== sessionIdRef.current) {
+          console.log('❌ SESSION ID MISMATCH - BLOCKING COMPLETION EVENT!');
+          console.log('   Server session:', data?.session_id);
+          console.log('   Frontend session:', sessionIdRef.current);
+          return;
+        }
+        
+        console.log('✅ Session ID matches - processing completion event');
+        // Debug logging for completion event
+        console.log('DOWNLOAD DEBUG: Received processing_complete event', data);
+        console.log('DOWNLOAD DEBUG: Output file from server:', data.output_file);
+        console.log('DOWNLOAD DEBUG: Debug info:', data.debug_info);
+        
+        const downloadPath = `/api/download/${data.output_file}`;
+        console.log('DOWNLOAD DEBUG: Setting download path to:', downloadPath);
+        
         setState(prev => ({
           ...prev,
           processingStatus: 'completed',
-          outputFile: `/api/download/${data.output_file}`,
+          outputFile: downloadPath,
           elapsedTime: data.elapsed_time ?? prev.elapsedTime,
-          statusMessage: data.message ?? 'Processing complete!'
+          statusMessage: data.message ?? 'Processing complete!',
+          debugInfo: data.debug_info
         }));
       });
 
@@ -177,6 +254,33 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           processingStatus: 'error',
           connectionError: data?.message || 'Processing error occurred',
           statusMessage: data?.message || 'Processing error occurred',
+        }));
+      });
+      
+      // Handle cancellation notifications from backend
+      newSocket.on('processing_cancelled', (data) => {
+        if (data?.session_id !== sessionIdRef.current) return;
+        setState(prev => ({
+          ...prev,
+          processingStatus: 'idle',
+          statusMessage: data?.message || 'Processing cancelled',
+          sessionId: null,
+        }));
+      });
+      
+      // Debug logs from backend
+      newSocket.on('debug_log', (data) => {
+        console.log('🔥 RECEIVED DEBUG LOG FROM BACKEND:', data);
+        setState(prev => ({
+          ...prev,
+          debugLogs: [
+            ...prev.debugLogs,
+            {
+              message: data.message,
+              timestamp: data.timestamp || Date.now() / 1000,
+              sessionId: data.session_id || 'unknown'
+            }
+          ].slice(-500) // Keep only last 500 logs
         }));
       });
 
@@ -258,6 +362,19 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
   const startProcessing = useCallback(async () => {
     if (!state.uploadedVideo) return;
 
+    // Add debug message
+    setState(prev => ({
+      ...prev,
+      debugLogs: [
+        ...prev.debugLogs,
+        {
+          message: `📹 Starting video processing - File: ${state.uploadedVideo?.name || 'Unknown'}, Format: ${state.outputFormat}, Background: ${state.backgroundType}`,
+          timestamp: Date.now() / 1000,
+          sessionId: 'frontend'
+        }
+      ].slice(-500)
+    }));
+
     try {
       // Validate inputs
       if (state.backgroundType === 'Image' && !state.backgroundImage) {
@@ -310,6 +427,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       }
 
       const result = await response.json();
+      console.log('🆔 NEW SESSION ID ASSIGNED:', result.session_id);
       setState(prev => ({ ...prev, sessionId: result.session_id }));
     } catch (error) {
       setState(prev => ({
@@ -340,6 +458,14 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         totalFrames: 0,
         elapsedTime: 0,
         previewImage: null,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: '🛑 Cancel request sent to backend',
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-100)
       }));
     } catch (error) {
       console.error('Error canceling:', error);
@@ -347,26 +473,168 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
   }, [state.sessionId]);
 
   const downloadVideo = useCallback(async () => {
-    if (!state.outputFile) return;
+    // Add debug message
+    setState(prev => ({
+      ...prev,
+      debugLogs: [
+        ...prev.debugLogs,
+        {
+          message: `🔽 [DOWNLOAD] Standard download button clicked`,
+          timestamp: Date.now() / 1000,
+          sessionId: 'frontend'
+        }
+      ].slice(-500)
+    }));
+    
+    if (!state.outputFile) {
+      console.error('DOWNLOAD DEBUG: No output file available for download');
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `❌ [DOWNLOAD] ERROR: No output file available`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      return;
+    }
+    
     try {
       const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
       const fullUrl = `${API_BASE}${state.outputFile}`;
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `[DOWNLOAD] Output file: ${state.outputFile}`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          },
+          {
+            message: `[DOWNLOAD] Full URL: ${fullUrl}`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          },
+          {
+            message: `[DOWNLOAD] Fetching file from server...`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
 
       const response = await fetch(fullUrl, { mode: 'cors' });
-      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        setState(prev => ({
+          ...prev,
+          debugLogs: [
+            ...prev.debugLogs,
+            {
+              message: `❌ [DOWNLOAD] Fetch failed - Status: ${response.status}`,
+              timestamp: Date.now() / 1000,
+              sessionId: 'frontend'
+            },
+            {
+              message: `❌ [DOWNLOAD] Error: ${errorText}`,
+              timestamp: Date.now() / 1000,
+              sessionId: 'frontend'
+            }
+          ].slice(-500)
+        }));
+        throw new Error(`Download failed: ${response.status}`);
+      }
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `✅ [DOWNLOAD] Fetch successful, converting to blob...`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      
       const blob = await response.blob();
+      const blobSizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `[DOWNLOAD] Blob created - Size: ${blob.size} bytes (${blobSizeMB} MB)`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `processed_video_${Date.now()}.${state.outputFormat || 'mp4'}`;
+      
+      // Derive extension from actual output file path to avoid mismatches if backend falls back
+      const lastSlash = state.outputFile.lastIndexOf('/');
+      const fileSegment = lastSlash >= 0 ? state.outputFile.slice(lastSlash + 1) : state.outputFile;
+      const dotIndex = fileSegment.lastIndexOf('.');
+      const ext = dotIndex >= 0 ? fileSegment.slice(dotIndex + 1) : (state.outputFormat || 'mp4');
+      
+      const filename = `processed_video_${Date.now()}.${ext}`;
+      link.download = filename;
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `[DOWNLOAD] Triggering download - Filename: ${filename}`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      
+      // Trigger download
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
-    } catch (e) {
-      console.error('Download error', e);
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `✅ [DOWNLOAD] Download triggered successfully!`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+    } catch (e: any) {
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `❌ [DOWNLOAD] Error: ${e?.message || 'Unknown error'}`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      alert(`Download failed: ${e?.message || 'Unknown error'}. Check debug console for details.`);
     }
-  }, [state.outputFile, state.outputFormat]);
+  }, [state.outputFile, state.outputFormat, state.debugInfo]);
 
   const resetState = useCallback(() => {
     setState(prev => ({
@@ -380,6 +648,104 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       elapsedTime: 0,
       previewImage: null,
       outputFile: null,
+    }));
+  }, []);
+
+  // Direct download method that gets raw video data
+  const downloadVideoDirectly = useCallback(async () => {
+    setState(prev => ({
+      ...prev,
+      debugLogs: [
+        ...prev.debugLogs,
+        {
+          message: `💾 [DIRECT DOWNLOAD] Direct download button clicked`,
+          timestamp: Date.now() / 1000,
+          sessionId: 'frontend'
+        }
+      ].slice(-500)
+    }));
+    
+    if (!state.outputFile) {
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `❌ [DIRECT DOWNLOAD] ERROR: No output file available`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      return;
+    }
+    
+    try {
+      // Extract filename from outputFile path
+      const lastSlash = state.outputFile.lastIndexOf('/');
+      const filename = lastSlash >= 0 ? state.outputFile.slice(lastSlash + 1) : state.outputFile;
+      
+      setState(prev => ({
+        ...prev,
+        debugLogs: [
+          ...prev.debugLogs,
+          {
+            message: `[DIRECT DOWNLOAD] Extracted filename: ${filename}`,
+            timestamp: Date.now() / 1000,
+            sessionId: 'frontend'
+          }
+        ].slice(-500)
+      }));
+      
+      const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+      const dataUrl = `${API_BASE}/api/get_video_data/${filename}`;
+      console.log('DIRECT DOWNLOAD: Fetching from:', dataUrl);
+      
+      const response = await fetch(dataUrl);
+      if (!response.ok) {
+        console.error('DIRECT DOWNLOAD: API request failed:', response.status);
+        const errorText = await response.text();
+        console.error('DIRECT DOWNLOAD: Error details:', errorText);
+        throw new Error(`API request failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('DIRECT DOWNLOAD: Received data:', { ...result, data: '[DATA URI TRUNCATED]' });
+      
+      if (!result.success || !result.data) {
+        throw new Error('Invalid response from server');
+      }
+      
+      // Create download from data URI
+      const link = document.createElement('a');
+      link.href = result.data;
+      link.download = result.filename || `processed_video_${Date.now()}.${state.outputFormat}`;
+      console.log('DIRECT DOWNLOAD: Triggering download with filename:', link.download);
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log('DIRECT DOWNLOAD: Direct download process complete');
+    } catch (e: any) {
+      console.error('DIRECT DOWNLOAD: Error during direct download:', e);
+      alert(`Direct download failed: ${e?.message || 'Unknown error'}. Check console for details.`);
+    }
+  }, [state.outputFile, state.outputFormat]);
+
+  // Toggle debug panel
+  const toggleDebugPanel = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      showDebugPanel: !prev.showDebugPanel
+    }));
+  }, []);
+  
+  // Clear debug logs
+  const clearDebugLogs = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      debugLogs: []
     }));
   }, []);
 
@@ -399,7 +765,10 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     startProcessing,
     cancelProcessing,
     downloadVideo,
+    downloadVideoDirectly,
     resetState,
+    toggleDebugPanel,
+    clearDebugLogs,
   };
 
   return (
