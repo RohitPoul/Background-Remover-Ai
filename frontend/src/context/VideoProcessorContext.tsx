@@ -20,6 +20,8 @@ interface VideoProcessorState {
   currentFrame: number;
   totalFrames: number;
   previewImage: string | null;
+  processedFrames: string[]; // Array of URLs for all processed frames
+  selectedFrameIndex: number; // Currently selected frame in slider
   outputFile: string | null;
   statusMessage: string | null;
   debugInfo?: any; // Debug information from backend
@@ -53,6 +55,7 @@ interface VideoProcessorContextType extends VideoProcessorState {
   setFastMode: (fastMode: boolean) => void;
   setMaxWorkers: (workers: number) => void;
   setOutputFormat: (format: 'mp4' | 'webm' | 'mov') => void;
+  setSelectedFrameIndex: (index: number) => void;
   
   // Actions
   startProcessing: () => void;
@@ -82,6 +85,8 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     currentFrame: 0,
     totalFrames: 0,
     previewImage: null,
+    processedFrames: [],
+    selectedFrameIndex: 0,
     outputFile: null,
     statusMessage: null,
     connectionError: null,
@@ -128,7 +133,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
               timestamp: Date.now() / 1000,
               sessionId: 'frontend'
             }
-          ].slice(-100)
+          ]
         }));
       }
     };
@@ -174,7 +179,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
               timestamp: Date.now() / 1000,
               sessionId: 'frontend'
             }
-          ].slice(-100)
+          ]
         }));
       });
 
@@ -203,6 +208,13 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
 
       newSocket.on('processing_update', (data) => {
         if (data?.session_id !== sessionIdRef.current) return;
+        
+        // Debug log for frame data [[memory:6712208]]
+        if (data.all_frames && data.all_frames.length > 0) {
+          console.log(`📸 [FRAMES] Received ${data.all_frames.length} frame URLs for frame ${data.currentFrame}/${data.totalFrames}`);
+          console.log('📸 [FRAMES] Sample frame URL:', data.all_frames[0]);
+        }
+        
         setState(prev => ({
           ...prev,
           processingStatus: data.status === 'started' ? 'started' : 'processing',
@@ -211,6 +223,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           currentFrame: data.currentFrame ?? prev.currentFrame,
           totalFrames: data.totalFrames ?? prev.totalFrames,
           previewImage: data.preview_image ?? prev.previewImage,
+          processedFrames: data.all_frames ?? prev.processedFrames,
           statusMessage: data.message ?? prev.statusMessage,
         }));
       });
@@ -280,7 +293,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
               timestamp: data.timestamp || Date.now() / 1000,
               sessionId: data.session_id || 'unknown'
             }
-          ].slice(-500) // Keep only last 500 logs
+          ]
         }));
       });
 
@@ -358,6 +371,10 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, outputFormat: format }));
   }, []);
 
+  const setSelectedFrameIndex = useCallback((index: number) => {
+    setState(prev => ({ ...prev, selectedFrameIndex: index }));
+  }, []);
+
   // Actions
   const startProcessing = useCallback(async () => {
     if (!state.uploadedVideo) return;
@@ -372,7 +389,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           timestamp: Date.now() / 1000,
           sessionId: 'frontend'
         }
-      ].slice(-500)
+      ]
     }));
 
     try {
@@ -385,6 +402,24 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       }
 
       // Prepare form data
+      console.log('🚀 [FRONTEND] PREPARING API REQUEST');
+      console.log('====================================');
+      console.log('🎯 CRITICAL PARAMETERS:');
+      console.log(`  - bg_type: '${state.backgroundType}'`);
+      console.log(`  - output_format: '${state.outputFormat}'`);
+      console.log(`  - Is Transparent? ${state.backgroundType === 'Transparent'}`);
+      console.log(`  - Is WebM? ${state.outputFormat === 'webm'}`);
+      console.log('\n📝 ALL PARAMETERS:');
+      console.log(`  - video: ${state.uploadedVideo.name} (${(state.uploadedVideo.size / 1024 / 1024).toFixed(2)} MB)`);
+      console.log(`  - bg_type: '${state.backgroundType}'`);
+      console.log(`  - color: '${state.backgroundColor}'`);
+      console.log(`  - fps: ${state.fps}`);
+      console.log(`  - video_handling: '${state.videoHandling}'`);
+      console.log(`  - fast_mode: ${state.fastMode}`);
+      console.log(`  - max_workers: ${state.maxWorkers}`);
+      console.log(`  - output_format: '${state.outputFormat}'`);
+      console.log('====================================');
+      
       const formData = new FormData();
       formData.append('video', state.uploadedVideo);
       formData.append('bg_type', state.backgroundType);
@@ -411,12 +446,24 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         totalFrames: 0,
         elapsedTime: 0,
         previewImage: null,
+        processedFrames: [],
+        selectedFrameIndex: 0,
         outputFile: null,
         connectionError: null,
       }));
 
       // Send request
       const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+      console.log(`🌐 [FRONTEND] Sending POST request to: ${API_BASE}/api/process_video`);
+      console.log('📦 FormData contents:');
+      Array.from(formData.entries()).forEach(([key, value]) => {
+        if (value instanceof File) {
+          console.log(`  - ${key}: [File: ${value.name}]`);
+        } else {
+          console.log(`  - ${key}: '${value}'`);
+        }
+      });
+      
       const response = await fetch(`${API_BASE}/api/process_video`, {
         method: 'POST',
         body: formData,
@@ -465,7 +512,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-100)
+        ]
       }));
     } catch (error) {
       console.error('Error canceling:', error);
@@ -497,7 +544,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
       return;
     }
@@ -525,7 +572,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
 
       const response = await fetch(fullUrl, { mode: 'cors' });
@@ -560,7 +607,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
       
       const blob = await response.blob();
@@ -575,7 +622,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
       
       const blobUrl = URL.createObjectURL(blob);
@@ -600,7 +647,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
       
       // Trigger download
@@ -618,7 +665,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ].slice(-500)
+        ]
       }));
     } catch (e: any) {
       setState(prev => ({
@@ -647,6 +694,8 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       totalFrames: 0,
       elapsedTime: 0,
       previewImage: null,
+      processedFrames: [],
+      selectedFrameIndex: 0,
       outputFile: null,
     }));
   }, []);
@@ -762,6 +811,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     setFastMode,
     setMaxWorkers,
     setOutputFormat,
+    setSelectedFrameIndex,
     startProcessing,
     cancelProcessing,
     downloadVideo,

@@ -259,7 +259,7 @@ function cleanupTempFiles() {
   });
   
   // Log preserved files
-  const outputPatterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov'];
+  const outputPatterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov', 'temp_output_*_preview.webm'];
   let preservedCount = 0;
   outputPatterns.forEach(pattern => {
     preservedCount += glob.sync(pattern).length;

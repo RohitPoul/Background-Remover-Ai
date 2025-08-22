@@ -6,6 +6,7 @@ import {
 
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
+import FrameSlider from './FrameSlider';
 
 export default function DualVideoPreview() {
   const {
@@ -40,17 +41,43 @@ export default function DualVideoPreview() {
   const [processedBlobUrl, setProcessedBlobUrl] = useState<string>('');
   const processedUrl = outputFile ? `${API_BASE}${outputFile}` : '';
   
+  // For MOV files, use WebM preview for video player but keep MOV for download
+  const getPreviewUrl = (originalUrl: string, format: string): string => {
+    console.log(`🎥 [DualVideoPreview] getPreviewUrl called - format: ${format}, originalUrl: ${originalUrl}`);
+    if (format === 'mov' && originalUrl) {
+      // Replace the file extension/name to get preview file
+      // Convert: /temp_output_123.mov or /temp_output_123_transparent.mov
+      // To: /temp_output_123_preview.webm
+      const previewUrl = originalUrl.replace(/\/temp_output_([^/]+)\.mov$/, '/temp_output_$1_preview.webm')
+                                   .replace(/\/temp_output_([^/]+)_transparent\.mov$/, '/temp_output_$1_preview.webm');
+      console.log('🎬 [DualVideoPreview] Using WebM preview for MOV:', previewUrl);
+      console.log('🎬 [DualVideoPreview] Original MOV URL:', originalUrl);
+      return previewUrl;
+    }
+    return originalUrl;
+  };
+  
+  const previewUrl = getPreviewUrl(processedUrl, outputFormat);
+  
   // Convert processed video to blob URL to avoid CSP issues
   useEffect(() => {
-    if (processedUrl && processingStatus === 'completed') {
-      console.log('🎬 Fetching processed video as blob:', processedUrl);
+    if (previewUrl && processingStatus === 'completed') {
+      console.log('🎬 Fetching processed video as blob:', previewUrl);
       console.log('📦 Output format:', outputFormat);
       console.log('🎨 Background type:', backgroundType);
+      console.log('💾 Original download URL:', processedUrl);
       
       // Fetch the video as blob and create a blob URL
-      fetch(processedUrl)
+      fetch(previewUrl)
         .then(response => {
-          if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+          if (!response.ok) {
+            console.warn(`⚠️ Preview file not found (${response.status}), falling back to original`);
+            // If preview file doesn't exist, fall back to original file
+            return fetch(processedUrl).then(r => {
+              if (!r.ok) throw new Error(`Failed to fetch original: ${r.status}`);
+              return r.blob();
+            });
+          }
           return response.blob();
         })
         .then(blob => {
@@ -70,7 +97,7 @@ export default function DualVideoPreview() {
         URL.revokeObjectURL(processedBlobUrl);
       }
     };
-  }, [processedUrl, processingStatus, outputFormat, backgroundType]);
+  }, [previewUrl, processedUrl, processingStatus, outputFormat, backgroundType]);
 
   const Header = () => {
     if (processingStatus === 'processing' || processingStatus === 'started') {
@@ -225,6 +252,13 @@ export default function DualVideoPreview() {
             </Paper>
           </Grid>
         </Grid>
+        
+        {/* Frame Slider for live preview navigation */}
+        {(processingStatus === 'processing' || processingStatus === 'completed') && (
+          <Box sx={{ mt: 2 }}>
+            <FrameSlider />
+          </Box>
+        )}
       </Box>
     </Fade>
   );

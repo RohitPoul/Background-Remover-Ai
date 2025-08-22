@@ -65,7 +65,11 @@ export default function ProcessingControls() {
             variant="contained"
             size="large"
             startIcon={<DownloadIcon />}
-            onClick={downloadVideo}
+            onClick={() => {
+              console.log('📥 [FRONTEND] Download Button Clicked');
+              console.log(`  - Output file available: ${outputFile ? 'Yes' : 'No'}`);
+              downloadVideo();
+            }}
             data-debug-label="download-video"
             sx={{
               py: 2,
@@ -87,7 +91,11 @@ export default function ProcessingControls() {
             variant="contained"
             size="large"
             startIcon={<StopIcon />}
-            onClick={cancelProcessing}
+            onClick={() => {
+              console.log('⛔ [FRONTEND] Cancel Processing Button Clicked');
+              console.log(`  - Current status: ${processingStatus}`);
+              cancelProcessing();
+            }}
             data-debug-label="cancel-processing"
             sx={{
               py: 2,
@@ -107,7 +115,18 @@ export default function ProcessingControls() {
             variant="contained"
             size="large"
             startIcon={<PlayIcon />}
-            onClick={startProcessing}
+            onClick={() => {
+              console.log('🎬 [FRONTEND] START PROCESSING BUTTON CLICKED');
+              console.log('  === CURRENT SETTINGS ===');
+              console.log(`  - Background Type: '${backgroundType}'`);
+              console.log(`  - Output Format: '${outputFormat}'`);
+              console.log(`  - Fast Mode: ${fastMode}`);
+              console.log(`  - FPS: ${fps === 0 ? 'Original' : fps}`);
+              console.log(`  - Max Workers: ${maxWorkers}`);
+              console.log(`  - Uploaded Video: ${uploadedVideo?.name || 'None'}`);
+              console.log('  ======================');
+              startProcessing();
+            }}
             disabled={!uploadedVideo || isProcessing}
             data-debug-label="start-processing"
             sx={{
@@ -150,7 +169,12 @@ export default function ProcessingControls() {
           control={
             <Switch
               checked={fastMode}
-              onChange={(e) => setFastMode(e.target.checked)}
+              onChange={(e) => {
+                console.log('⚡ [FRONTEND] Fast Mode Toggle');
+                console.log(`  - New value: ${e.target.checked}`);
+                console.log(`  - Previous: ${fastMode}`);
+                setFastMode(e.target.checked);
+              }}
               disabled={isProcessing}
               sx={{
                 '& .MuiSwitch-switchBase.Mui-checked': {
@@ -192,7 +216,11 @@ export default function ProcessingControls() {
         size="small"
         startIcon={<TuneIcon />}
         endIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-        onClick={() => setShowAdvanced(!showAdvanced)}
+        onClick={() => {
+          console.log('🔧 [FRONTEND] Advanced Settings Toggle');
+          console.log(`  - New state: ${!showAdvanced ? 'Open' : 'Closed'}`);
+          setShowAdvanced(!showAdvanced);
+        }}
         disabled={isProcessing}
         sx={{
           mb: 2,
@@ -237,7 +265,12 @@ export default function ProcessingControls() {
             <Box sx={{ px: 1 }}>
               <Slider
                 value={fps}
-                onChange={(_, value) => setFps(value as number)}
+                onChange={(_, value) => {
+                  console.log('🎥 [FRONTEND] FPS Slider Changed');
+                  console.log(`  - New FPS: ${value === 0 ? 'Original' : value}`);
+                  console.log(`  - Previous: ${fps === 0 ? 'Original' : fps}`);
+                  setFps(value as number);
+                }}
                 disabled={isProcessing}
                 min={0}
                 max={60}
@@ -289,7 +322,24 @@ export default function ProcessingControls() {
             <ToggleButtonGroup
               value={outputFormat}
               exclusive
-              onChange={(_, value) => value && setOutputFormat(value)}
+              onChange={(_, value) => {
+                if (value) {
+                  console.log('📼 [FRONTEND] OUTPUT FORMAT CHANGED');
+                  console.log(`  - Selected: '${value}'`);
+                  console.log(`  - Previous: '${outputFormat}'`);
+                  console.log(`  - Background Type: '${backgroundType}'`);
+                  
+                  // Auto-switch from MP4 if transparent is selected
+                  if (backgroundType === 'Transparent' && value === 'mp4') {
+                    console.log('  ⚠️ Cannot use MP4 with Transparent background!');
+                    console.log('  ✅ Auto-switching to MOV instead');
+                    setOutputFormat('mov');
+                  } else {
+                    setOutputFormat(value);
+                    console.log(`  ✅ Output format set to: '${value}'`);
+                  }
+                }
+              }}
               size="small"
               fullWidth
               sx={{
@@ -299,11 +349,14 @@ export default function ProcessingControls() {
                 },
               }}
             >
-              <ToggleButton value="mp4">
+              <ToggleButton 
+                value="mp4"
+                disabled={backgroundType === 'Transparent'}
+              >
                 <Box>
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>MP4</Typography>
                   <Typography variant="caption" sx={{ display: 'block', fontSize: '0.65rem', color: 'text.secondary' }}>
-                    Standard
+                    {backgroundType === 'Transparent' ? 'No alpha' : 'Standard'}
                   </Typography>
                 </Box>
               </ToggleButton>
@@ -311,7 +364,7 @@ export default function ProcessingControls() {
                 <Box>
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>WebM</Typography>
                   <Typography variant="caption" sx={{ display: 'block', fontSize: '0.65rem', color: 'text.secondary' }}>
-                    Alpha support
+                    {backgroundType === 'Transparent' ? 'VP9 + Alpha' : 'VP9 codec'}
                   </Typography>
                 </Box>
               </ToggleButton>
@@ -319,15 +372,15 @@ export default function ProcessingControls() {
                 <Box>
                   <Typography variant="caption" sx={{ fontWeight: 600 }}>MOV</Typography>
                   <Typography variant="caption" sx={{ display: 'block', fontSize: '0.65rem', color: 'text.secondary' }}>
-                    ProRes 4444
+                    {backgroundType === 'Transparent' ? 'PNG + Alpha' : 'H.264'}
                   </Typography>
                 </Box>
               </ToggleButton>
             </ToggleButtonGroup>
-            {backgroundType === 'Transparent' && outputFormat === 'mp4' && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
+            {backgroundType === 'Transparent' && (
+              <Alert severity="info" sx={{ mt: 1 }}>
                 <Typography variant="caption">
-                  MP4 doesn't support transparency. Switch to WebM or MOV for transparent backgrounds.
+                  ✨ Transparency enabled - WebM uses VP9 with alpha, MOV uses PNG codec
                 </Typography>
               </Alert>
             )}
@@ -354,7 +407,12 @@ export default function ProcessingControls() {
             <Box sx={{ px: 1 }}>
               <Slider
                 value={maxWorkers}
-                onChange={(_, value) => setMaxWorkers(value as number)}
+                onChange={(_, value) => {
+                  console.log('⚙️ [FRONTEND] Max Workers Changed');
+                  console.log(`  - New value: ${value}`);
+                  console.log(`  - Previous: ${maxWorkers}`);
+                  setMaxWorkers(value as number);
+                }}
                 disabled={isProcessing}
                 min={1}
                 max={4}
