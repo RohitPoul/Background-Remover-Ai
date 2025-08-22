@@ -240,22 +240,34 @@ ipcMain.handle('close-window', () => {
   }
 });
 
-// Cleanup function for temp files
+// Cleanup function for temp files (only on app exit)
 function cleanupTempFiles() {
-  console.log('Cleaning up temporary files...');
+  console.log('App exiting - cleaning up temporary files...');
   const glob = require('glob');
-  const patterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov', 'temp_video_*.mp4', 'input_*.mp4', 'bg_*.*'];
+  // Only clean up INPUT files automatically, preserve OUTPUT files for user
+  const patterns = ['input_*.mp4', 'bg_*.*', 'temp_video_*.mp4'];
   
   patterns.forEach(pattern => {
     glob.sync(pattern).forEach(file => {
       try {
         fs.unlinkSync(file);
-        console.log(`Deleted: ${file}`);
+        console.log(`Deleted input file: ${file}`);
       } catch (err) {
         console.error(`Failed to delete ${file}:`, err);
       }
     });
   });
+  
+  // Log preserved files
+  const outputPatterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov'];
+  let preservedCount = 0;
+  outputPatterns.forEach(pattern => {
+    preservedCount += glob.sync(pattern).length;
+  });
+  
+  if (preservedCount > 0) {
+    console.log(`Preserved ${preservedCount} processed video files for user access`);
+  }
 }
 
 // Clean up when app is closing

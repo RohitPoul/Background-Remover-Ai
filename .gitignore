@@ -47,6 +47,11 @@ temp_output_*.mov
 *.processed.webm
 *.processed.mov
 
+# Debug frames and helper files (for research and debugging only)
+debug_frames/
+debug_frames.py
+debug_frames_helper.py
+
 # Binary files
 bin/
 

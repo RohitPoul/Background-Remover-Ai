@@ -18,6 +18,7 @@ import {
   Download as DownloadIcon,
   Refresh as RefreshIcon,
   ContentCopy as CopyIcon,
+  CleaningServices as CleanupIcon,
 } from '@mui/icons-material';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
@@ -76,6 +77,27 @@ export default function DebugPanel() {
     });
   };
   
+  // Manual cleanup of processed files
+  const cleanupProcessedFiles = async () => {
+    try {
+      const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+      const response = await fetch(`${API_BASE}/api/cleanup_files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Cleanup complete! Removed ${result.files_removed?.length || 0} processed video files.`);
+      } else {
+        alert('Cleanup failed. Check debug console for details.');
+      }
+    } catch (error) {
+      console.error('Cleanup error:', error);
+      alert('Failed to cleanup files. Check debug console for details.');
+    }
+  };
+  
   if (!showDebugPanel) return null;
   
   return (
@@ -127,6 +149,11 @@ export default function DebugPanel() {
         <Tooltip title="Clear logs">
           <IconButton size="small" onClick={clearDebugLogs} sx={{ color: 'warning.main' }}>
             <DeleteIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Cleanup processed files">
+          <IconButton size="small" onClick={cleanupProcessedFiles} sx={{ color: 'error.main' }}>
+            <CleanupIcon fontSize="small" />
           </IconButton>
         </Tooltip>
         <Tooltip title="Close">

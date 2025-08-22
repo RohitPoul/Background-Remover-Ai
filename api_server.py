@@ -380,6 +380,36 @@ def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, backgrou
             result = np.array(pil_result)
             debug_log(f"[FRAME {frame_id}] Resized to match original dimensions", "frame_process")
         
+        # CRITICAL: Verify processing actually did something
+        debug_log(f"[FRAME {frame_id}] Checking if background removal was successful...", "frame_process")
+        
+        # Fix transparency consistency issues
+        if result.shape[2] == 4:  # RGBA with transparency
+            debug_log(f"[FRAME {frame_id}] ✅ RGBA image with transparency created", "frame_process")
+            # Check if alpha channel has actual transparency data
+            alpha = result[:, :, 3]
+            unique_alpha_values = len(np.unique(alpha))
+            debug_log(f"[FRAME {frame_id}] Alpha channel has {unique_alpha_values} unique values", "frame_process")
+            
+            if unique_alpha_values <= 1:
+                debug_log(f"[FRAME {frame_id}] ⚠️ WARNING: Alpha channel is uniform (no transparency variation)", "frame_process")
+        elif frame.shape != result.shape:
+            debug_log(f"[FRAME {frame_id}] ✅ Shape changed: {frame.shape} -> {result.shape}", "frame_process")
+        else:
+            # Compare pixels to see if they changed
+            try:
+                # Calculate a quick pixel diff - if background was removed, there should be differences
+                pixel_diff_pct = np.count_nonzero(frame != result) / frame.size * 100
+                debug_log(f"[FRAME {frame_id}] Pixel difference: {pixel_diff_pct:.2f}%", "frame_process")
+                
+                if pixel_diff_pct < 1:
+                    debug_log(f"[FRAME {frame_id}] ❌ WARNING: Frame appears UNCHANGED! Less than 1% different!", "frame_process")
+                    debug_log(f"[FRAME {frame_id}] POSSIBLE BACKGROUND REMOVAL FAILURE", "frame_process")
+                else:
+                    debug_log(f"[FRAME {frame_id}] ✅ Frame successfully modified, {pixel_diff_pct:.2f}% pixels changed", "frame_process")
+            except Exception as comp_err:
+                debug_log(f"[FRAME {frame_id}] Could not compare pixel differences: {comp_err}", "frame_process")
+        
         debug_log(f"[FRAME {frame_id}] Frame processed successfully - Final shape: {result.shape}", "frame_process")
         return result, bg_frame_index
     except Exception as e:
@@ -454,7 +484,24 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     if transparent:
         debug_log("[AI] Creating TRANSPARENT image with alpha channel...", "ai_process")
         image_rgba = image.convert("RGBA")
+        
+        # CRITICAL FIX: Also clear RGB channels where transparent!
+        # Convert mask to numpy for processing
+        import numpy as np
+        mask_np = np.array(mask)
+        image_np = np.array(image_rgba)
+        
+        # Where mask is 0 (transparent), set RGB to black (or could be white)
+        # This ensures that if alpha is lost, we see black, not original background
+        transparent_pixels = mask_np < 128  # Threshold for transparency
+        image_np[transparent_pixels] = [0, 0, 0, 0]  # Black with full transparency
+        
+        # Convert back to PIL Image
+        image_rgba = Image.fromarray(image_np, 'RGBA')
+        
+        # Apply the mask properly
         image_rgba.putalpha(mask)
+        
         debug_log(f"[AI] Transparent RGBA image created - size: {image_rgba.size}, mode: {image_rgba.mode}", "ai_process")
         return image_rgba
     
@@ -701,6 +748,33 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                     else:
                         # Verify we got the processed frame with correct shape
                         debug_log(f"[{session_id}] Got processed frame {i+1} - Shape: {result.shape}, dtype: {result.dtype}", session_id)
+                    
+                    # DIAGNOSTIC: For first frame, save comparison to debug folder
+                    if i == 0:  # Only save the first frame to avoid too many files
+                        try:
+                            # Note that we'll save all frames at the end of processing
+                            # This is just to catch any early issues
+                            
+                            # Compare frames
+                            if frames[i].shape != result.shape:
+                                debug_log(f"[{session_id}] FRAME {i+1} CHANGED: {frames[i].shape} -> {result.shape}", session_id)
+                            else:
+                                are_identical = np.array_equal(frames[i], result)
+                                debug_log(f"[{session_id}] FRAME {i+1} IDENTICAL: {are_identical}", session_id)
+                            
+                            # Report to console
+                            if result.shape[2] == 4:
+                                # Check if alpha channel has real transparency
+                                alpha = result[:, :, 3]
+                                unique_alpha = len(np.unique(alpha))
+                                debug_log(f"[{session_id}] Frame {i+1} has alpha channel with {unique_alpha} unique values", session_id)
+                                if unique_alpha <= 1:
+                                    debug_log(f"[{session_id}] WARNING: Frame {i+1} alpha channel is uniform - no transparency!", session_id)
+                                else:
+                                    debug_log(f"[{session_id}] Frame {i+1} has proper transparency", session_id)
+                        except Exception as compare_err:
+                            debug_log(f"[{session_id}] Error comparing frames: {compare_err}", session_id)
+                    
                     processed_frames.append(result)
                     successfully_processed += 1
                     debug_log(f"[{session_id}] Frame {i+1} collected successfully", session_id)
@@ -760,16 +834,70 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         debug_log(f"[{session_id}] Creating final video with {len(processed_frames)} processed frames", session_id)
         debug_log(f"[{session_id}] DEBUG: processed_frames type: {type(processed_frames)}, length: {len(processed_frames)}", session_id)
         
+        # DEEP MEMORY-LEVEL DEBUGGING FOR FRAME RECOMPILATION
+        debug_log(f"[{session_id}] ============ FRAME RECOMPILATION DEBUG ============", session_id)
+        debug_log(f"[{session_id}] Total frames in memory: {len(processed_frames)}", session_id)
+        debug_log(f"[{session_id}] Memory addresses: processed_frames at {id(processed_frames)}", session_id)
+        
+        # CRITICAL: Save frames to disk for inspection
+        debug_log(f"[{session_id}] ============ SAVING DEBUG FRAMES FOR INSPECTION ============", session_id)
+        try:
+            # Import our helper script
+            import sys
+            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+            from debug_frames_helper import save_debug_frames
+            
+            # Save processed frames
+            debug_dir = save_debug_frames(session_id, processed_frames, "processed")
+            
+            # Save original frames for comparison
+            if len(frames) > 0:
+                save_debug_frames(session_id, frames, "original")
+            
+            debug_log(f"[{session_id}] Debug frames saved to: {debug_dir}", session_id)
+            debug_log(f"[{session_id}] Look in this folder to see original and processed frames", session_id)
+        except Exception as save_err:
+            debug_log(f"[{session_id}] Error saving debug frames: {save_err}", session_id)
+            import traceback
+            debug_log(f"[{session_id}] {traceback.format_exc()}", session_id)
+        
         # Verify we're using processed frames (should have 4 channels for RGBA if transparent)
         if processed_frames and len(processed_frames) > 0:
+            # Check first, middle, and last frames for consistency
+            frames_to_check = [
+                (0, "First"),
+                (len(processed_frames) // 2, "Middle"),
+                (len(processed_frames) - 1, "Last")
+            ]
+            
+            for idx, label in frames_to_check:
+                if idx < len(processed_frames):
+                    frame = processed_frames[idx]
+                    debug_log(f"[{session_id}] {label} frame [{idx}]:", session_id)
+                    debug_log(f"[{session_id}]   - Shape: {frame.shape}", session_id)
+                    debug_log(f"[{session_id}]   - Dtype: {frame.dtype}", session_id)
+                    debug_log(f"[{session_id}]   - Memory address: {id(frame)}", session_id)
+                    debug_log(f"[{session_id}]   - Min/Max values: {frame.min()}/{frame.max()}", session_id)
+                    if len(frame.shape) == 3 and frame.shape[2] == 4:
+                        # Check alpha channel for transparency
+                        alpha_channel = frame[:, :, 3]
+                        unique_alpha = np.unique(alpha_channel)
+                        debug_log(f"[{session_id}]   - Alpha channel unique values count: {len(unique_alpha)}", session_id)
+                        debug_log(f"[{session_id}]   - Alpha range: {alpha_channel.min()}-{alpha_channel.max()}", session_id)
+                        if len(unique_alpha) > 1:
+                            debug_log(f"[{session_id}]   - CONFIRMED: Alpha channel has transparency data", session_id)
+                        else:
+                            debug_log(f"[{session_id}]   - WARNING: Alpha channel is uniform (no transparency variation)", session_id)
+            
             first_frame_shape = processed_frames[0].shape
-            debug_log(f"[{session_id}] VERIFICATION: First processed frame shape: {first_frame_shape}", session_id)
             if bg_type == "Transparent" and len(first_frame_shape) == 3 and first_frame_shape[2] == 4:
                 debug_log(f"[{session_id}] CONFIRMED: Using RGBA processed frames with transparency", session_id)
             elif bg_type == "Transparent" and len(first_frame_shape) == 3 and first_frame_shape[2] == 3:
-                debug_log(f"[{session_id}] WARNING: Expected RGBA (4 channels) but got RGB (3 channels)", session_id)
+                debug_log(f"[{session_id}] ERROR: Expected RGBA (4 channels) but got RGB (3 channels) - Transparency LOST!", session_id)
             else:
                 debug_log(f"[{session_id}] CONFIRMED: Using processed frames with {first_frame_shape[2]} channels", session_id)
+        
+        debug_log(f"[{session_id}] ============ END FRAME RECOMPILATION DEBUG ============", session_id)
         
         # Additional debug info
         debug_log(f"[{session_id}] Output format: {output_format}", session_id)
@@ -786,41 +914,221 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         })
         
         try:
-            # Ensure all frames have the same dimensions
+            # Ensure all frames have the same dimensions AND CHANNELS
             if processed_frames:
                 first_shape = processed_frames[0].shape
                 print(f"[{session_id}] First frame shape: {first_shape}, dtype: {processed_frames[0].dtype}")
                 
-                # Normalize all frames to the same shape
+                # Check for channel consistency
+                has_transparency = False
+                rgba_count = 0
+                rgb_count = 0
+                
+                # Count how many frames are RGBA vs RGB
+                for frame in processed_frames:
+                    if len(frame.shape) == 3 and frame.shape[2] == 4:  # RGBA
+                        rgba_count += 1
+                    elif len(frame.shape) == 3 and frame.shape[2] == 3:  # RGB
+                        rgb_count += 1
+                
+                # Determine if we need transparency based on majority
+                if rgba_count > rgb_count:
+                    has_transparency = True
+                    debug_log(f"[{session_id}] Most frames have transparency ({rgba_count} RGBA vs {rgb_count} RGB) - preserving transparency", session_id)
+                else:
+                    debug_log(f"[{session_id}] Most frames are RGB ({rgb_count} RGB vs {rgba_count} RGBA) - removing transparency", session_id)
+                
+                # Normalize all frames to the same shape and channel count
                 normalized_frames = []
                 for idx, frame in enumerate(processed_frames):
-                    if frame.shape != first_shape:
-                        print(f"[{session_id}] Frame {idx} has different shape: {frame.shape}, resizing to {first_shape}")
-                        # Resize frame to match first frame
-                        pil_frame = Image.fromarray(frame.astype(np.uint8))
+                    # First handle resolution differences
+                    if frame.shape[:2] != first_shape[:2]:
+                        debug_log(f"[{session_id}] Frame {idx} has different resolution: {frame.shape[:2]}, resizing to {first_shape[:2]}", session_id)
+                        # Resize frame to match first frame resolution
+                        pil_frame = Image.fromarray(frame.astype(np.uint8), mode='RGBA' if frame.shape[2] == 4 else 'RGB')
                         pil_frame = pil_frame.resize((first_shape[1], first_shape[0]), Image.LANCZOS)
                         frame = np.array(pil_frame)
+                    
+                    # Then handle channel differences
+                    if has_transparency and frame.shape[2] == 3:  # Add alpha channel to RGB
+                        debug_log(f"[{session_id}] Adding alpha channel to frame {idx}", session_id)
+                        height, width = frame.shape[:2]
+                        rgba_frame = np.ones((height, width, 4), dtype=np.uint8) * 255
+                        rgba_frame[:, :, :3] = frame  # Copy RGB data
+                        frame = rgba_frame
+                    elif not has_transparency and frame.shape[2] == 4:  # Remove alpha channel from RGBA
+                        debug_log(f"[{session_id}] Removing alpha channel from frame {idx}", session_id)
+                        frame = frame[:, :, :3]  # Keep only RGB channels
+                    
                     # Ensure uint8 dtype
                     if frame.dtype != np.uint8:
                         debug_log(f"[{session_id}] Converting frame {idx} from dtype {frame.dtype} to uint8", session_id)
                         frame = frame.astype(np.uint8)
+                        
                     normalized_frames.append(frame)
                 
-                debug_log(f"[{session_id}] Creating ImageSequenceClip with {len(normalized_frames)} frames at {fps} fps", session_id)
-                processed_video = ImageSequenceClip(normalized_frames, fps=fps)
-                debug_log(f"[{session_id}] ImageSequenceClip created successfully, duration: {processed_video.duration}s", session_id)
+                # Save some normalized frames for verification
+                try:
+                    # Import our helper script
+                    import sys
+                    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                    from debug_frames_helper import save_debug_frames
+                    
+                    # Save normalized frames
+                    debug_dir = save_debug_frames(session_id, normalized_frames, "normalized")
+                    debug_log(f"[{session_id}] Normalized frames saved to: {debug_dir}", session_id)
+                except Exception as save_err:
+                    debug_log(f"[{session_id}] Error saving normalized frames: {save_err}", session_id)
+                    import traceback
+                    debug_log(f"[{session_id}] {traceback.format_exc()}", session_id)
                 
-                # Try to add audio if available
-                if audio is not None:
-                    try:
-                        debug_log(f"[{session_id}] Attempting to add audio...", session_id)
-                        processed_video = processed_video.set_audio(audio)
-                        debug_log(f"[{session_id}] Audio added to video successfully", session_id)
-                    except Exception as audio_error:
-                        debug_log(f"[{session_id}] Could not add audio: {audio_error}", session_id)
+                debug_log(f"[{session_id}] Creating ImageSequenceClip with {len(normalized_frames)} frames at {fps} fps", session_id)
+                
+                # CRITICAL: Check if we're actually using the processed frames, not original
+                debug_log(f"[{session_id}] RECOMPILATION CHECK: normalized_frames memory address: {id(normalized_frames)}", session_id)
+                debug_log(f"[{session_id}] RECOMPILATION CHECK: Are we using processed_frames? {id(normalized_frames) != id(frames)}", session_id)
+                if normalized_frames and len(normalized_frames) > 0:
+                    sample_frame = normalized_frames[0]
+                    debug_log(f"[{session_id}] RECOMPILATION: Sample frame shape: {sample_frame.shape}, dtype: {sample_frame.dtype}", session_id)
+                    if bg_type == "Transparent" and len(sample_frame.shape) == 3:
+                        if sample_frame.shape[2] == 4:
+                            debug_log(f"[{session_id}] SUCCESS: Frames have alpha channel for transparency", session_id)
+                        else:
+                            debug_log(f"[{session_id}] ERROR: Frames missing alpha channel! Only {sample_frame.shape[2]} channels", session_id)
+                
+                # CRITICAL FIX: Handle transparency by BYPASSING MoviePy and using direct FFmpeg
+                if bg_type == "Transparent" and normalized_frames and len(normalized_frames) > 0:
+                    sample = normalized_frames[0]
+                    if len(sample.shape) == 3 and sample.shape[2] == 4:
+                        debug_log(f"[{session_id}] Creating video with TRANSPARENCY support (RGBA frames detected)", session_id)
+                        
+                        # DETAILED FRAME IDENTIFICATION - Which images are being recompiled?
+                        debug_log(f"[{session_id}] ============ FRAME IDENTIFICATION DEBUG ============", session_id)
+                        for idx in range(min(3, len(normalized_frames))):  # First 3 frames
+                            frame = normalized_frames[idx]
+                            rgb_part = frame[:, :, :3]
+                            alpha_part = frame[:, :, 3]
+                            debug_log(f"[{session_id}] FRAME {idx}:", session_id)
+                            debug_log(f"[{session_id}]   RGB shape: {rgb_part.shape}, dtype: {rgb_part.dtype}", session_id)
+                            debug_log(f"[{session_id}]   RGB range: {rgb_part.min()}-{rgb_part.max()}", session_id)
+                            debug_log(f"[{session_id}]   Alpha shape: {alpha_part.shape}, dtype: {alpha_part.dtype}", session_id)
+                            debug_log(f"[{session_id}]   Alpha range: {alpha_part.min()}-{alpha_part.max()}", session_id)
+                            
+                            # Check if this looks like original (no background removal) or processed
+                            alpha_unique = len(np.unique(alpha_part))
+                            if alpha_unique == 1:
+                                debug_log(f"[{session_id}]   ERROR: FRAME {idx}: Alpha is UNIFORM ({alpha_part[0,0]}) - NO TRANSPARENCY!", session_id)
+                            elif alpha_unique < 10:
+                                debug_log(f"[{session_id}]   WARNING: FRAME {idx}: Alpha has {alpha_unique} values - LIMITED transparency", session_id)
+                            else:
+                                debug_log(f"[{session_id}]   SUCCESS: FRAME {idx}: Alpha has {alpha_unique} values - GOOD transparency", session_id)
+                        debug_log(f"[{session_id}] ============ END FRAME IDENTIFICATION DEBUG ============", session_id)
+                        
+                        # BYPASS MoviePy for transparency - save frames as PNG sequence and use direct FFmpeg
+                        debug_log(f"[{session_id}] BYPASSING MoviePy - saving RGBA frames as PNG sequence for direct FFmpeg", session_id)
+                        
+                        # Create temporary directory for PNG frames
+                        import tempfile
+                        temp_dir = tempfile.mkdtemp(prefix=f"frames_{session_id}_")
+                        debug_log(f"[{session_id}] Created temp directory: {temp_dir}", session_id)
+                        
+                        # Save all RGBA frames as PNG files (preserves transparency)
+                        frame_paths = []
+                        for idx, frame in enumerate(normalized_frames):
+                            frame_path = os.path.join(temp_dir, f"frame_{idx:06d}.png")
+                            # Convert numpy RGBA to PIL and save as PNG
+                            pil_frame = Image.fromarray(frame.astype(np.uint8), mode='RGBA')
+                            pil_frame.save(frame_path, 'PNG')
+                            frame_paths.append(frame_path)
+                        
+                        debug_log(f"[{session_id}] Saved {len(frame_paths)} RGBA frames as PNG files", session_id)
+                        
+                        # Use direct FFmpeg to create WebM with transparency
+                        output_path = f"temp_output_{session_id}.webm"
+                        abs_output_path = os.path.join(os.getcwd(), output_path)
+                        
+                        ffmpeg_path = os.path.join(os.getcwd(), 'bin', 'ffmpeg.exe')
+                        if not os.path.exists(ffmpeg_path):
+                            ffmpeg_path = 'ffmpeg'
+                        
+                        # Build FFmpeg command with correct input ordering
+                        # 1) Inputs: frames first, then audio (if any)
+                        ffmpeg_cmd = [
+                            ffmpeg_path,
+                            '-framerate', str(fps),
+                            '-i', os.path.join(temp_dir, 'frame_%06d.png')
+                        ]
+
+                        # Add audio as a second input if available
+                        audio_path = None
+                        if audio is not None:
+                            debug_log(f"[{session_id}] Audio detected, will include in FFmpeg command", session_id)
+                            audio_path = os.path.join(temp_dir, 'audio.wav')
+                            audio.write_audiofile(audio_path, logger=None)
+                            ffmpeg_cmd.extend(['-i', audio_path])
+
+                        # 2) Codec and encoding options
+                        ffmpeg_cmd.extend([
+                            '-c:v', 'libvpx-vp9',
+                            '-pix_fmt', 'yuva420p',  # Force alpha pixel format
+                            '-auto-alt-ref', '0',
+                            '-lag-in-frames', '0',
+                            '-b:v', '0',
+                            '-crf', '32'
+                        ])
+
+                        # Add audio codec if audio was included
+                        if audio_path is not None:
+                            ffmpeg_cmd.extend(['-c:a', 'libopus'])
+
+                        # 3) Output (must be last)
+                        ffmpeg_cmd.extend(['-y', abs_output_path])
+                        
+                        debug_log(f"[{session_id}] Running direct FFmpeg command for transparency", session_id)
+                        debug_log(f"[{session_id}] FFmpeg command: {' '.join(ffmpeg_cmd)}", session_id)
+                        
+                        import subprocess
+                        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+                        
+                        if result.returncode == 0:
+                            debug_log(f"[{session_id}] Direct FFmpeg encoding successful!", session_id)
+                        else:
+                            debug_log(f"[{session_id}] FFmpeg error: {result.stderr}", session_id)
+                            raise Exception(f"FFmpeg failed: {result.stderr}")
+                        
+                        # Cleanup PNG frames
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                        debug_log(f"[{session_id}] Cleaned up temporary PNG frames", session_id)
+                        
+                        # Create a dummy video object for compatibility
+                        processed_video = None  # We'll skip MoviePy export
+                        debug_log(f"[{session_id}] Direct transparency encoding complete - skipping MoviePy export", session_id)
+                    else:
+                        debug_log(f"[{session_id}] WARNING: Expected RGBA frames for transparency but got shape {sample.shape}", session_id)
+                        processed_video = ImageSequenceClip(normalized_frames, fps=fps)
                 else:
-                    debug_log(f"[{session_id}] No audio in original video", session_id)
-            else:
+                    # Non-transparent video - use frames as-is
+                    debug_log(f"[{session_id}] Creating standard video (no transparency)", session_id)
+                    processed_video = ImageSequenceClip(normalized_frames, fps=fps)
+            
+            # Only log duration if processed_video exists (not None from direct FFmpeg path)
+            if processed_video is not None:
+                debug_log(f"[{session_id}] ImageSequenceClip created successfully, duration: {processed_video.duration}s", session_id)
+            
+            # Try to add audio if available
+            if audio is not None and processed_video is not None:
+                try:
+                    debug_log(f"[{session_id}] Attempting to add audio...", session_id)
+                    processed_video = processed_video.set_audio(audio)
+                    debug_log(f"[{session_id}] Audio added to video successfully", session_id)
+                except Exception as audio_error:
+                    debug_log(f"[{session_id}] Could not add audio: {audio_error}", session_id)
+            elif audio is None:
+                debug_log(f"[{session_id}] No audio in original video", session_id)
+            
+            # Check if we have valid frames
+            if not processed_frames and processed_video is None:
                 debug_log(f"[{session_id}] ERROR: No processed frames available!", session_id)
                 raise ValueError("No processed frames to create video")
                 
@@ -828,111 +1136,180 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
             debug_log(f"[{session_id}] Error creating video: {video_error}", session_id)
             import traceback
             traceback.print_exc()
+            
+            # Check if we already successfully created a transparent video with direct FFmpeg
+            output_path = f"temp_output_{session_id}.webm"
+            abs_output_path = os.path.join(os.getcwd(), output_path)
+            if bg_type == "Transparent" and os.path.exists(abs_output_path):
+                debug_log(f"[{session_id}] Direct FFmpeg transparent video already exists at {abs_output_path} - skipping fallback", session_id)
+                processed_video = None  # Keep it None to skip MoviePy export
             # Try without audio as fallback
-            if processed_frames:
+            elif processed_frames:
                 debug_log(f"[{session_id}] Attempting fallback: creating video without audio", session_id)
-                processed_video = ImageSequenceClip(processed_frames, fps=fps)
-                debug_log(f"[{session_id}] Fallback video created successfully", session_id)
+                # IMPORTANT: Preserve transparency in fallback too!
+                if bg_type == "Transparent" and len(processed_frames[0].shape) == 3 and processed_frames[0].shape[2] == 4:
+                    debug_log(f"[{session_id}] Using transparency-preserving fallback for RGBA frames", session_id)
+                    # Use direct RGBA frames in fallback too
+                    processed_video = ImageSequenceClip(processed_frames, fps=fps, with_mask=True)
+                    debug_log(f"[{session_id}] Fallback video created with RGBA transparency", session_id)
+                else:
+                    processed_video = ImageSequenceClip(processed_frames, fps=fps)
+                    debug_log(f"[{session_id}] Fallback video created successfully (no transparency)", session_id)
             else:
                 raise
         
-        # Determine output format and codec with error handling
-        output_ext = output_format.lower()
-        debug_log(f"[{session_id}] STARTING VIDEO EXPORT - Format: {output_ext}, Background type: {bg_type}", session_id)
-        
-        try:
-            if output_ext == 'webm':
-                output_path = f"temp_output_{session_id}.webm"
-                debug_log(f"[{session_id}] Configuring WebM export...", session_id)
-                # Use VP9 codec for WebM with alpha channel support
-                if bg_type == "Transparent":
-                    codec = "libvpx-vp9"
-                    codec_params = ["-pix_fmt", "yuva420p"]  # Support alpha channel
-                    debug_log(f"[{session_id}] WebM with TRANSPARENCY - codec: {codec}, pixel format: yuva420p", session_id)
-                else:
-                    codec = "libvpx-vp9"
-                    codec_params = []
-                    debug_log(f"[{session_id}] WebM standard - codec: {codec}", session_id)
-                # Speed/quality tradeoffs for faster export
-                codec_params += ["-b:v", "0", "-crf", "32", "-deadline", "good", "-cpu-used", "4"]
-                debug_log(f"[{session_id}] WebM codec params: {codec_params}", session_id)
-                # Ensure absolute path
-                abs_output_path = os.path.join(os.getcwd(), output_path)
-                debug_log(f"[{session_id}] Writing WebM to: {abs_output_path}", session_id)
-                debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
-                processed_video.write_videofile(abs_output_path, codec=codec, threads=2, ffmpeg_params=codec_params, logger=None)
-                debug_log(f"[{session_id}] WebM video written successfully", session_id)
-            elif output_ext == 'mov':
-                output_path = f"temp_output_{session_id}.mov"
-                debug_log(f"[{session_id}] Configuring MOV export...", session_id)
-                # Use ProRes 4444 for MOV with alpha channel support
-                if bg_type == "Transparent":
-                    codec = "prores_ks"
-                    codec_params = ["-profile:v", "4444", "-pix_fmt", "yuva444p10le"]
-                    debug_log(f"[{session_id}] MOV with TRANSPARENCY - codec: ProRes 4444, pixel format: yuva444p10le", session_id)
-                else:
-                    codec = "libx264"
-                    codec_params = []
-                    debug_log(f"[{session_id}] MOV standard - codec: libx264", session_id)
-                # Ensure absolute path
-                abs_output_path = os.path.join(os.getcwd(), output_path)
-                debug_log(f"[{session_id}] Writing MOV to: {abs_output_path}", session_id)
-                debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
-                processed_video.write_videofile(abs_output_path, codec=codec, threads=2, ffmpeg_params=codec_params, logger=None)
-                debug_log(f"[{session_id}] MOV video written successfully", session_id)
-            else:  # Default to MP4
-                output_path = f"temp_output_{session_id}.mp4"
-                debug_log(f"[{session_id}] Configuring MP4 export (standard format)...", session_id)
-                # Ensure absolute path
-                abs_output_path = os.path.join(os.getcwd(), output_path)
-                debug_log(f"[{session_id}] Writing MP4 to: {abs_output_path}", session_id)
-                debug_log(f"[{session_id}] MP4 codec: libx264, preset: veryfast, crf: 20", session_id)
-                debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
-                processed_video.write_videofile(abs_output_path, codec="libx264", threads=2, ffmpeg_params=["-preset", "veryfast", "-crf", "20"], logger=None)
-                debug_log(f"[{session_id}] MP4 video written successfully", session_id)
+        # Skip MoviePy export if we already used direct FFmpeg for transparency
+        output_path = f"temp_output_{session_id}.webm"
+        abs_output_path = os.path.join(os.getcwd(), output_path)
+        if processed_video is None and bg_type == "Transparent" and os.path.exists(abs_output_path):
+            debug_log(f"[{session_id}] Video already created with direct FFmpeg at {abs_output_path} - skipping MoviePy export", session_id)
+        else:
+            # Determine output format and codec with error handling
+            output_ext = output_format.lower()
+            debug_log(f"[{session_id}] STARTING VIDEO EXPORT - Format: {output_ext}, Background type: {bg_type}", session_id)
             
-            # Check if file was created
-            debug_log(f"[{session_id}] Verifying output file...", session_id)
-            if os.path.exists(abs_output_path):
-                file_size = os.path.getsize(abs_output_path)
-                file_size_mb = file_size / (1024 * 1024)
-                debug_log(f"[{session_id}] VIDEO SAVED SUCCESSFULLY!", session_id)
-                debug_log(f"[{session_id}] Format: {output_ext.upper()}", session_id)
-                debug_log(f"[{session_id}] File size: {file_size} bytes ({file_size_mb:.2f} MB)", session_id)
-                debug_log(f"[{session_id}] Location: {abs_output_path}", session_id)
-                # DO NOT track output file for cleanup - keep for download
-                # temp_files.add(abs_output_path)  # Commented out to prevent premature deletion
-                debug_log(f"[{session_id}] Output file preserved for download (not tracked for cleanup)", session_id)
-            else:
-                debug_log(f"[{session_id}] ERROR: Output file was not created!", session_id)
-                debug_log(f"[{session_id}] Expected location: {abs_output_path}", session_id)
-                raise FileNotFoundError(f"Output file {abs_output_path} was not created")
-                
-        except Exception as write_error:
-            debug_log(f"[{session_id}] Error writing video: {write_error}", session_id)
-            import traceback
-            error_trace = traceback.format_exc()
-            debug_log(f"[{session_id}] Stack trace:\n{error_trace}", session_id)
-            # Fallback to basic MP4
-            output_path = f"temp_output_{session_id}.mp4"
-            debug_log(f"[{session_id}] Attempting fallback to basic MP4...", session_id)
             try:
-                # Ensure absolute path for fallback
-                abs_output_path = os.path.join(os.getcwd(), output_path)
-                debug_log(f"[{session_id}] Fallback path: {abs_output_path}", session_id)
-                processed_video.write_videofile(abs_output_path, codec="libx264", threads=1, logger=None)
-                debug_log(f"[{session_id}] Fallback video saved successfully!", session_id)
-                # Track output file for cleanup
+                if output_ext == 'webm':
+                    output_path = f"temp_output_{session_id}.webm"
+                    debug_log(f"[{session_id}] Configuring WebM export...", session_id)
+                    # Use VP9 codec for WebM with alpha channel support
+                    if bg_type == "Transparent":
+                        # Verify the video has a mask before export
+                        if hasattr(processed_video, 'mask') and processed_video.mask is not None:
+                            debug_log(f"[{session_id}] CONFIRMED: Video has mask for transparency export", session_id)
+                        else:
+                            debug_log(f"[{session_id}] WARNING: No mask found on video - transparency may be lost!", session_id)
+                        
+                        codec = "libvpx-vp9"
+                        # CRITICAL: Force MoviePy to preserve alpha channel
+                        codec_params = [
+                            "-pix_fmt", "yuva420p",  # Alpha pixel format
+                            "-auto-alt-ref", "0",    # Disable alt-ref frames that can break transparency
+                            "-lag-in-frames", "0"    # Disable frame lag that can break transparency
+                        ]
+                        debug_log(f"[{session_id}] WebM with TRANSPARENCY - codec: {codec}, pixel format: yuva420p", session_id)
+                        debug_log(f"[{session_id}] FORCING transparency preservation with MoviePy", session_id)
+                    else:
+                        codec = "libvpx-vp9"
+                        codec_params = []
+                        debug_log(f"[{session_id}] WebM standard - codec: {codec}", session_id)
+                    # Speed/quality tradeoffs for faster export
+                    codec_params += ["-b:v", "0", "-crf", "32", "-deadline", "good", "-cpu-used", "4"]
+                    debug_log(f"[{session_id}] WebM codec params: {codec_params}", session_id)
+                    # Ensure absolute path
+                    abs_output_path = os.path.join(os.getcwd(), output_path)
+                    debug_log(f"[{session_id}] Writing WebM to: {abs_output_path}", session_id)
+                    debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
+                    processed_video.write_videofile(abs_output_path, codec=codec, threads=2, ffmpeg_params=codec_params, logger=None)
+                    debug_log(f"[{session_id}] WebM video written successfully", session_id)
+                elif output_ext == 'mov':
+                    output_path = f"temp_output_{session_id}.mov"
+                    debug_log(f"[{session_id}] Configuring MOV export...", session_id)
+                    # Use ProRes 4444 for MOV with alpha channel support
+                    if bg_type == "Transparent":
+                        codec = "prores_ks"
+                        codec_params = ["-profile:v", "4444", "-pix_fmt", "yuva444p10le"]
+                        debug_log(f"[{session_id}] MOV with TRANSPARENCY - codec: ProRes 4444, pixel format: yuva444p10le", session_id)
+                    else:
+                        codec = "libx264"
+                        codec_params = []
+                        debug_log(f"[{session_id}] MOV standard - codec: libx264", session_id)
+                    # Ensure absolute path
+                    abs_output_path = os.path.join(os.getcwd(), output_path)
+                    debug_log(f"[{session_id}] Writing MOV to: {abs_output_path}", session_id)
+                    debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
+                    processed_video.write_videofile(abs_output_path, codec=codec, threads=2, ffmpeg_params=codec_params, logger=None)
+                    debug_log(f"[{session_id}] MOV video written successfully", session_id)
+                else:  # Default to MP4
+                    output_path = f"temp_output_{session_id}.mp4"
+                    debug_log(f"[{session_id}] Configuring MP4 export (standard format)...", session_id)
+                    # Ensure absolute path
+                    abs_output_path = os.path.join(os.getcwd(), output_path)
+                    debug_log(f"[{session_id}] Writing MP4 to: {abs_output_path}", session_id)
+                    debug_log(f"[{session_id}] MP4 codec: libx264, preset: veryfast, crf: 20", session_id)
+                    debug_log(f"[{session_id}] Calling FFmpeg to encode video...", session_id)
+                    processed_video.write_videofile(abs_output_path, codec="libx264", threads=2, ffmpeg_params=["-preset", "veryfast", "-crf", "20"], logger=None)
+                    debug_log(f"[{session_id}] MP4 video written successfully", session_id)
+            
+                # Check if file was created
+                debug_log(f"[{session_id}] Verifying output file...", session_id)
                 if os.path.exists(abs_output_path):
+                    file_size = os.path.getsize(abs_output_path)
+                    file_size_mb = file_size / (1024 * 1024)
+                    debug_log(f"[{session_id}] VIDEO SAVED SUCCESSFULLY!", session_id)
+                    debug_log(f"[{session_id}] Format: {output_ext.upper()}", session_id)
+                    debug_log(f"[{session_id}] File size: {file_size} bytes ({file_size_mb:.2f} MB)", session_id)
+                    debug_log(f"[{session_id}] Location: {abs_output_path}", session_id)
+                    
+                    # Verify pixel format (alpha presence) using ffprobe if available
+                    try:
+                        import subprocess, json, shutil
+                        # Prefer bundled ffprobe in bin
+                        candidates = [
+                            os.path.join(os.getcwd(), 'bin', 'ffprobe.exe'),
+                            os.path.join(os.getcwd(), 'bin', 'ffprobe'),
+                            shutil.which('ffprobe')
+                        ]
+                        ffprobe_path = next((p for p in candidates if p and os.path.exists(p)), None)
+                        if ffprobe_path:
+                            cmd = [
+                                ffprobe_path,
+                                '-v','error',
+                                '-select_streams','v:0',
+                                '-show_entries','stream=pix_fmt,codec_name,width,height,nb_frames',
+                                '-of','json',
+                                abs_output_path
+                            ]
+                            result = subprocess.run(cmd, capture_output=True, text=True)
+                            if result.returncode == 0 and result.stdout:
+                                info = json.loads(result.stdout)
+                                stream = (info.get('streams') or [{}])[0]
+                                pix_fmt = stream.get('pix_fmt')
+                                codec = stream.get('codec_name')
+                                debug_log(f"[{session_id}] FFPROBE: codec={codec}, pix_fmt={pix_fmt}", session_id)
+                                if pix_fmt and ('a' in pix_fmt or 'yuva' in pix_fmt or pix_fmt.endswith('a')):
+                                    debug_log(f"[{session_id}] FFPROBE: Alpha channel PRESENT (pix_fmt {pix_fmt})", session_id)
+                                else:
+                                    debug_log(f"[{session_id}] FFPROBE: Alpha channel NOT detected (pix_fmt {pix_fmt})", session_id)
+                            else:
+                                debug_log(f"[{session_id}] FFPROBE warning: {result.stderr.strip()}", session_id)
+                        else:
+                            debug_log(f"[{session_id}] FFPROBE not found; skipping pixel format verification", session_id)
+                    except Exception as probe_err:
+                        debug_log(f"[{session_id}] FFPROBE error: {probe_err}", session_id)
                     # DO NOT track output file for cleanup - keep for download
                     # temp_files.add(abs_output_path)  # Commented out to prevent premature deletion
-                    debug_log(f"[{session_id}] Fallback output file preserved for download", session_id)
-            except Exception as fallback_error:
-                debug_log(f"[{session_id}] CRITICAL: Fallback also failed: {fallback_error}", session_id)
+                    debug_log(f"[{session_id}] Output file preserved for download (not tracked for cleanup)", session_id)
+                else:
+                    debug_log(f"[{session_id}] ERROR: Output file was not created!", session_id)
+                    debug_log(f"[{session_id}] Expected location: {abs_output_path}", session_id)
+                    raise FileNotFoundError(f"Output file {abs_output_path} was not created")
+                    
+            except Exception as write_error:
+                debug_log(f"[{session_id}] Error writing video: {write_error}", session_id)
                 import traceback
-                fallback_trace = traceback.format_exc()
-                debug_log(f"[{session_id}] Fallback error trace:\n{fallback_trace}", session_id)
-                raise
+                error_trace = traceback.format_exc()
+                debug_log(f"[{session_id}] Stack trace:\n{error_trace}", session_id)
+                # Fallback to basic MP4
+                output_path = f"temp_output_{session_id}.mp4"
+                debug_log(f"[{session_id}] Attempting fallback to basic MP4...", session_id)
+                try:
+                    # Ensure absolute path for fallback
+                    abs_output_path = os.path.join(os.getcwd(), output_path)
+                    debug_log(f"[{session_id}] Fallback path: {abs_output_path}", session_id)
+                    processed_video.write_videofile(abs_output_path, codec="libx264", threads=1, logger=None)
+                    debug_log(f"[{session_id}] Fallback video saved successfully!", session_id)
+                    # Track output file for cleanup
+                    if os.path.exists(abs_output_path):
+                        # DO NOT track output file for cleanup - keep for download
+                        # temp_files.add(abs_output_path)  # Commented out to prevent premature deletion
+                        debug_log(f"[{session_id}] Fallback output file preserved for download", session_id)
+                except Exception as fallback_error:
+                    debug_log(f"[{session_id}] CRITICAL: Fallback also failed: {fallback_error}", session_id)
+                    import traceback
+                    fallback_trace = traceback.format_exc()
+                    debug_log(f"[{session_id}] Fallback error trace:\n{fallback_trace}", session_id)
+                    raise
         
         elapsed_time = time.time() - start_time
         debug_log(f"[{session_id}] PROCESSING COMPLETED in {elapsed_time:.2f} seconds", session_id)
@@ -1012,7 +1389,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
             del active_sessions[session_id]
             debug_log(f"[{session_id}] Session removed from active sessions", session_id)
         
-        # Cleanup temporary input files
+        # Only cleanup INPUT files (not output files)
         try:
             if os.path.exists(video_path):
                 os.remove(video_path)
@@ -1020,6 +1397,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
             if bg_path and os.path.exists(bg_path):
                 os.remove(bg_path)
                 debug_log(f"[{session_id}] Removed background file", session_id)
+            debug_log(f"[{session_id}] NOTE: Output file preserved for download - will cleanup on app exit or manual removal", session_id)
         except Exception as cleanup_err:
             debug_log(f"[{session_id}] Cleanup warning: {cleanup_err}", session_id)
 
@@ -1252,19 +1630,51 @@ def debug_log(message, session_id=None):
     if session_id is None:
         session_id = 'system'
     
-    # Print to console
-    print(message)
+    # Print to console with proper error handling for Windows
+    try:
+        print(message)
+    except (OSError, UnicodeEncodeError) as e:
+        # Handle Windows console encoding issues
+        try:
+            # Try to encode as UTF-8 and ignore problematic characters
+            safe_message = str(message).encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+            print(safe_message)
+        except:
+            # If all else fails, just print a simple message
+            print(f"[{session_id}] Message could not be displayed (encoding error)")
     
     # Send to frontend - broadcast to all clients
     try:
-        # Use broadcast=True as a method call, not a parameter
+        # Ensure message is a string and handle encoding
+        if not isinstance(message, str):
+            message = str(message)
+        
+        # Clean the message to remove problematic characters
+        # Remove null bytes and other control characters that can cause issues
+        message = message.replace('\x00', '').encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        
+        # Truncate very long messages
+        if len(message) > 5000:
+            message = message[:4997] + "..."
+        
+        # Ensure session_id is also clean
+        session_id_str = str(session_id).replace('\x00', '').encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        
+        # Try to emit with error handling
         socketio.emit('debug_log', {
-            'session_id': session_id,
+            'session_id': session_id_str,
             'message': message,
             'timestamp': time.time()
         })
-    except Exception as e:
-        print(f"Could not send to frontend: {e}")
+    except (OSError, Exception) as e:
+        # Handle OSError [Errno 22] and other exceptions
+        # Don't try to print the full error as it might cause another encoding issue
+        try:
+            # Try to at least log that there was an issue
+            print(f"[{session_id}] Debug message could not be sent to frontend")
+        except:
+            # Complete failure - silently continue
+            pass
 
 @app.route('/api/download/<filename>')
 def download_file(filename):
@@ -1464,6 +1874,32 @@ def reset_models():
         'message': 'Models reset and load attempted'
     })
 
+@app.route('/api/cleanup_files', methods=['POST'])
+def cleanup_files():
+    """Manual cleanup of processed output files"""
+    try:
+        cleaned_files = []
+        patterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov']
+        
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                try:
+                    os.remove(filepath)
+                    cleaned_files.append(filepath)
+                    debug_log(f"[CLEANUP] Manually removed: {filepath}", "system")
+                except Exception as e:
+                    debug_log(f"[CLEANUP] Failed to remove {filepath}: {e}", "system")
+        
+        debug_log(f"[CLEANUP] Manual cleanup complete - removed {len(cleaned_files)} files", "system")
+        return jsonify({
+            'status': 'success',
+            'message': f'Cleaned up {len(cleaned_files)} processed video files',
+            'files_removed': cleaned_files
+        })
+    except Exception as e:
+        debug_log(f"[CLEANUP] Error during manual cleanup: {e}", "system")
+        return jsonify({'error': str(e)}), 500
+
 @socketio.on('connect')
 def handle_connect():
     client_id = request.sid
@@ -1496,10 +1932,11 @@ def handle_disconnect():
         print(f"Cancelling session {session_id} for disconnected client")
         if session_id in active_sessions:
             del active_sessions[session_id]
-        # Clean up session-specific temp files
-        for pattern in [f'temp_output_{session_id}.*', f'temp_video_{session_id}.*']:
+        # Only clean up INPUT files on disconnect, preserve OUTPUT files for download
+        for pattern in [f'input_{session_id}.*', f'bg_{session_id}.*']:
             for filepath in glob.glob(pattern):
                 cleanup_temp_file(filepath)
+        debug_log(f"[DISCONNECT] Preserved output files for session {session_id} - use /api/cleanup_files to remove manually", "system")
 
 import atexit
 import signal

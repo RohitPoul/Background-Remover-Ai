@@ -14,7 +14,8 @@ export default function DualVideoPreview() {
     processingStatus,
     outputFile,
     downloadVideo,
-
+    backgroundType,
+    outputFormat,
     progress,
     currentFrame,
     totalFrames,
@@ -36,7 +37,40 @@ export default function DualVideoPreview() {
   }, [uploadedVideo]);
 
   const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+  const [processedBlobUrl, setProcessedBlobUrl] = useState<string>('');
   const processedUrl = outputFile ? `${API_BASE}${outputFile}` : '';
+  
+  // Convert processed video to blob URL to avoid CSP issues
+  useEffect(() => {
+    if (processedUrl && processingStatus === 'completed') {
+      console.log('🎬 Fetching processed video as blob:', processedUrl);
+      console.log('📦 Output format:', outputFormat);
+      console.log('🎨 Background type:', backgroundType);
+      
+      // Fetch the video as blob and create a blob URL
+      fetch(processedUrl)
+        .then(response => {
+          if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+          return response.blob();
+        })
+        .then(blob => {
+          const blobUrl = URL.createObjectURL(blob);
+          console.log('✅ Blob URL created for preview:', blobUrl);
+          console.log('📏 Blob size:', blob.size, 'bytes');
+          setProcessedBlobUrl(blobUrl);
+        })
+        .catch(error => {
+          console.error('❌ Failed to create blob URL:', error);
+        });
+    }
+    
+    // Cleanup blob URL when component unmounts or URL changes
+    return () => {
+      if (processedBlobUrl) {
+        URL.revokeObjectURL(processedBlobUrl);
+      }
+    };
+  }, [processedUrl, processingStatus, outputFormat, backgroundType]);
 
   const Header = () => {
     if (processingStatus === 'processing' || processingStatus === 'started') {
@@ -115,7 +149,7 @@ export default function DualVideoPreview() {
                 Original
               </Typography>
               {uploadedVideo ? (
-                <video ref={originalVideoRef} muted={processingStatus !== 'completed'} loop autoPlay controls={processingStatus !== 'processing'}
+                <video ref={originalVideoRef} muted={processingStatus !== 'completed'} loop autoPlay controls
                   style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
               ) : (
                 <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -135,14 +169,35 @@ export default function DualVideoPreview() {
                 {processingStatus === 'completed' ? 'Processed' : processingStatus === 'processing' ? 'Live Preview' : 'Output'}
               </Typography>
 
-              {processingStatus === 'completed' && processedUrl && (
-                <video
-                  src={processedUrl}
-                  controls
-                  autoPlay
-                  loop
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }}
-                />
+              {processingStatus === 'completed' && processedBlobUrl && (
+                <Box sx={{ width: '100%', height: '100%', flex: 1, position: 'relative', 
+                  background: backgroundType === 'Transparent' ? 
+                    'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 20px 20px' : 
+                    'transparent' }}>
+                  <video
+                    src={processedBlobUrl}
+                    controls
+                    autoPlay
+                    loop
+                    muted
+                    style={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      objectFit: 'contain',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0
+                    }}
+                    onLoadedData={() => {
+                      console.log('✅ Processed video loaded successfully');
+                    }}
+                    onError={(e) => {
+                      console.error('❌ Video playback error:', e);
+                      console.log('Blob URL:', processedBlobUrl);
+                      console.log('Output format:', outputFormat);
+                    }}
+                  />
+                </Box>
               )}
 
               {processingStatus === 'processing' && (

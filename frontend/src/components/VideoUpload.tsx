@@ -19,7 +19,7 @@ import {
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 export default function VideoUpload() {
-  const { uploadedVideo, setUploadedVideo } = useVideoProcessor();
+  const { uploadedVideo, setUploadedVideo, cancelProcessing } = useVideoProcessor();
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -61,6 +61,10 @@ export default function VideoUpload() {
   const handleRemoveVideo = () => {
     setUploadedVideo(null);
     setUploadProgress(0);
+    // Reset the entire processing state when video is removed
+    if (cancelProcessing) {
+      cancelProcessing();
+    }
   };
 
   const formatFileSize = (bytes: number) => {
