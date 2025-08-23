@@ -101,21 +101,27 @@ if hw_settings['device'] == 'cpu':
         pass
 
 # Set device based on hardware detection
-# Force reload hardware settings to detect GPU
-try:
-    hardware_optimizer = get_hardware_optimizer()
-    hw_settings = hardware_optimizer.get_optimized_settings()
-    hardware_optimizer.print_optimization_report()
-except:
-    pass
-
-device = hw_settings['device']
-print(f"Using device: {device}")
-
-# Verify CUDA is actually available
-if device == 'cuda' and not torch.cuda.is_available():
-    print("Warning: CUDA requested but not available, falling back to CPU")
+# First check if CUDA is actually available
+if torch.cuda.is_available():
+    device = 'cuda'
+    print(f"✅ CUDA is available! Using GPU: {torch.cuda.get_device_name(0)}")
+    # Update hw_settings to reflect actual GPU availability
+    hw_settings['device'] = 'cuda'
+    # Force reload hardware settings to get GPU-optimized parameters
+    try:
+        hardware_optimizer = get_hardware_optimizer()
+        gpu_settings = hardware_optimizer.get_optimized_settings()
+        if gpu_settings['device'] == 'cuda':
+            hw_settings.update(gpu_settings)
+            print(f"Loaded GPU-optimized settings: batch_size={hw_settings['batch_size']}, workers={hw_settings['max_workers']}")
+    except:
+        pass
+else:
     device = 'cpu'
+    print("⚠️ CUDA not available, using CPU")
+    hw_settings['device'] = 'cpu'
+
+print(f"Using device: {device}")
 
 # Global settings from hardware optimizer
 MAX_BATCH_SIZE = hw_settings['batch_size'] if device != 'cpu' else 1
@@ -271,13 +277,16 @@ def preload_models():
         else:
             # Load both models for high-end systems
             if birefnet_lite is None:
-                print("Loading BiRefNet_lite model...")
+                print(f"Loading BiRefNet_lite model to {device}...")
                 birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
                     "ZhengPeng7/BiRefNet_lite",
                     trust_remote_code=True,
                     cache_dir=MODEL_CACHE_DIR
                 )
-                birefnet_lite.to(device).eval()
+                birefnet_lite = birefnet_lite.to(device)
+                birefnet_lite.eval()
+                if device == 'cuda':
+                    print(f"✅ BiRefNet_lite loaded to GPU: {torch.cuda.get_device_name(0)}")
                 birefnet_lite = quantize_model(birefnet_lite)
                 
             if birefnet is None and hw_settings.get('profile') in ['ultra', 'high']:
