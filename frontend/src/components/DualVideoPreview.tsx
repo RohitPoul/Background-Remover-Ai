@@ -21,6 +21,8 @@ export default function DualVideoPreview() {
     currentFrame,
     totalFrames,
     debugInfo,
+    processedFrames,
+    selectedFrameIndex,
   } = useVideoProcessor();
   
   // Track download attempts for debugging
@@ -166,96 +168,121 @@ export default function DualVideoPreview() {
 
   return (
     <Fade in timeout={500}>
-      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
-        <Header />
-        <Grid container spacing={2} sx={{ flex: 1, minHeight: 0 }}>
-          {/* Original */}
-          <Grid item xs={6} sx={{ minHeight: 0 }}>
-            <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
-                Original
-              </Typography>
-              {uploadedVideo ? (
-                <video ref={originalVideoRef} muted={processingStatus !== 'completed'} loop autoPlay controls
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
-              ) : (
-                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>No video loaded</Typography>
-                </Box>
-              )}
-            </Paper>
-          </Grid>
-
-          {/* Processed / Live Preview */}
-          <Grid item xs={6} sx={{ minHeight: 0 }}>
-            <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-              <Typography
-                variant="caption"
-                sx={{ color: processingStatus === 'completed' ? 'success.main' : processingStatus === 'processing' ? 'warning.main' : 'text.secondary', mb: 1, display: 'block' }}
-              >
-                {processingStatus === 'completed' ? 'Processed' : processingStatus === 'processing' ? 'Live Preview' : 'Output'}
-              </Typography>
-
-              {processingStatus === 'completed' && processedBlobUrl && (
-                <Box sx={{ width: '100%', height: '100%', flex: 1, position: 'relative', 
-                  background: backgroundType === 'Transparent' ? 
-                    'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 20px 20px' : 
-                    'transparent' }}>
-                  <video
-                    src={processedBlobUrl}
-                    controls
-                    autoPlay
-                    loop
-                    muted
-                    style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'contain',
-                      position: 'absolute',
-                      top: 0,
-                      left: 0
-                    }}
-                    onLoadedData={() => {
-                      console.log('✅ Processed video loaded successfully');
-                    }}
-                    onError={(e) => {
-                      console.error('❌ Video playback error:', e);
-                      console.log('Blob URL:', processedBlobUrl);
-                      console.log('Output format:', outputFormat);
-                    }}
-                  />
-                </Box>
-              )}
-
-              {processingStatus === 'processing' && (
-                previewImage ? (
-                  <img src={previewImage} alt="Processing preview" style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
+          <Header />
+          <Grid container spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+            {/* Original */}
+            <Grid item xs={6} sx={{ minHeight: 0 }}>
+              <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
+                  Original
+                </Typography>
+                {uploadedVideo ? (
+                  <video ref={originalVideoRef} muted={processingStatus !== 'completed'} loop autoPlay controls
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
                 ) : (
                   <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <CircularProgress />
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>No video loaded</Typography>
                   </Box>
-                )
-              )}
+                )}
+              </Paper>
+            </Grid>
 
-              {processingStatus === 'idle' && (
-                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>No output yet</Typography>
-                </Box>
-              )}
+            {/* Processed / Live Preview */}
+            <Grid item xs={6} sx={{ minHeight: 0 }}>
+              <Paper sx={{ height: '100%', p: 1, bgcolor: 'rgba(0,0,0,0.2)', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: processingStatus === 'completed' ? 'success.main' : processingStatus === 'processing' ? 'warning.main' : 'text.secondary', mb: 1, display: 'block' }}
+                >
+                  {processingStatus === 'completed' ? 'Processed' : processingStatus === 'processing' ? 'Live Preview' : 'Output'}
+                </Typography>
 
-              {processingStatus === 'processing' && (
-                <Paper sx={{ position: 'absolute', top: 32, right: 8, px: 1.5, py: 0.5, background: 'rgba(255, 152, 0, 0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'white', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.3 }, '100%': { opacity: 1 } } }} />
-                  <Typography variant="caption" sx={{ fontWeight: 600, color: 'white' }}>LIVE</Typography>
-                </Paper>
-              )}
-            </Paper>
+                {processingStatus === 'completed' && processedBlobUrl && (
+                  <Box sx={{ width: '100%', height: '100%', flex: 1, position: 'relative', 
+                    background: backgroundType === 'Transparent' ? 
+                      'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 20px 20px' : 
+                      'transparent' }}>
+                    <video
+                      src={processedBlobUrl}
+                      controls
+                      autoPlay
+                      loop
+                      muted
+                      style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        objectFit: 'contain',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0
+                      }}
+                      onLoadedData={() => {
+                        console.log('✅ Processed video loaded successfully');
+                      }}
+                      onError={(e) => {
+                        console.error('❌ Video playback error:', e);
+                        console.log('Blob URL:', processedBlobUrl);
+                        console.log('Output format:', outputFormat);
+                      }}
+                    />
+                  </Box>
+                )}
+
+                {processingStatus === 'processing' && (
+                  processedFrames.length > 0 && selectedFrameIndex < processedFrames.length ? (
+                    <Box sx={{ 
+                      width: '100%', 
+                      height: '100%', 
+                      flex: 1, 
+                      position: 'relative',
+                      background: backgroundType === 'Transparent' ? 
+                        'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 20px 20px' : 
+                        'transparent'
+                    }}>
+                      <img 
+                        src={`${API_BASE}${processedFrames[selectedFrameIndex]}`} 
+                        alt="Processing preview" 
+                        style={{ 
+                          width: '100%', 
+                          height: '100%', 
+                          objectFit: 'contain', 
+                          position: 'absolute',
+                          top: 0,
+                          left: 0
+                        }} 
+                      />
+                    </Box>
+                  ) : previewImage ? (
+                    <img src={previewImage} alt="Processing preview" style={{ width: '100%', height: '100%', objectFit: 'contain', flex: 1 }} />
+                  ) : (
+                    <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CircularProgress />
+                    </Box>
+                  )
+                )}
+
+                {processingStatus === 'idle' && (
+                  <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>No output yet</Typography>
+                  </Box>
+                )}
+
+                {processingStatus === 'processing' && (
+                  <Paper sx={{ position: 'absolute', top: 32, right: 8, px: 1.5, py: 0.5, background: 'rgba(255, 152, 0, 0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'white', animation: 'pulse 2s infinite', '@keyframes pulse': { '0%': { opacity: 1 }, '50%': { opacity: 0.3 }, '100%': { opacity: 1 } } }} />
+                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'white' }}>LIVE</Typography>
+                  </Paper>
+                )}
+              </Paper>
+            </Grid>
           </Grid>
-        </Grid>
+        </Box>
         
-        {/* Frame Slider for live preview navigation */}
-        {(processingStatus === 'processing' || processingStatus === 'completed') && (
-          <Box sx={{ mt: 2 }}>
+        {/* Frame Slider integrated at bottom */}
+        {(processingStatus === 'processing' && processedFrames.length > 0) && (
+          <Box sx={{ mt: 1 }}>
             <FrameSlider />
           </Box>
         )}

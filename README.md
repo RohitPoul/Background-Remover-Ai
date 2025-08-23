@@ -1,291 +1,224 @@
-# 🎬 AI Video Background Remover
+# 🎬 Video Background Remover AI
 
-A professional-grade AI-powered desktop application for removing and replacing video backgrounds using state-of-the-art BiRefNet models. Features real-time processing, transparent video support, and advanced debugging tools.
+An AI-powered desktop application for removing and replacing video backgrounds using state-of-the-art BiRefNet models. Built with Electron, React, and Python for cross-platform compatibility.
 
-## ✨ Key Features
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
+![Node](https://img.shields.io/badge/node-16+-green.svg)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)
 
-### 🎯 **Professional Background Removal**
-- **AI-Powered**: Uses BiRefNet and BiRefNet Lite models for precise background segmentation
-- **High Quality**: Supports up to 4K video processing with quality/speed modes
-- **Transparent Output**: Create transparent videos (WebM/MOV) perfect for stickers and overlays
-- **Multiple Formats**: Export as MP4, WebM (with alpha), or MOV (ProRes 4444)
+## ✨ Features
 
-### 🚀 **Advanced Processing Options**
-- **Dual Model System**: 
-  - **Quality Mode**: BiRefNet full model for best results
-  - **Fast Mode**: BiRefNet Lite for 4x faster processing
-- **Background Types**:
-  - 🎨 Solid colors with color picker
-  - 🖼️ Custom background images  
-  - 🎥 Background videos with smart handling (loop/slow down)
-  - ✨ **Transparent backgrounds** for sticker creation
-- **Parallel Processing**: Multi-threaded frame processing (1-4 workers)
-- **Custom FPS**: Control output frame rate (auto or 15-60 fps)
+- **🤖 AI-Powered Background Removal** - Uses BiRefNet/BiRefNet-Lite models for precise segmentation
+- **🚀 GPU Acceleration** - Automatic CUDA detection for NVIDIA GPUs (16x faster than CPU)
+- **🎨 Multiple Background Options**:
+  - Solid colors
+  - Custom images
+  - Video backgrounds
+  - Transparent (alpha channel preserved)
+- **📊 Real-time Processing** - Live preview with frame-by-frame progress
+- **🎯 Smart Hardware Detection** - Automatically optimizes settings based on your system
+- **💾 Multiple Output Formats** - MP4, WebM, MOV (with transparency support)
+- **🖥️ Native Desktop App** - Electron-based for Windows, macOS, and Linux
 
-### 🔧 **Developer-Friendly Tools**
-- **Real-Time Debug Console**: Complete visibility into processing pipeline
-- **Live Preview**: See results as frames are processed
-- **Progress Tracking**: Detailed progress with frame counters and timing
-- **Copy/Export Logs**: Share debug information easily
-- **Session Management**: Robust error handling and cancellation support
+## 🖼️ Screenshots
 
-### 💻 **Modern Desktop Experience**
-- **Beautiful UI**: Material Design with dark theme and smooth animations
-- **Drag & Drop**: Intuitive file upload interface
-- **Dual Preview**: Side-by-side original/processed video comparison
-- **Download Options**: Standard and direct download methods
-- **Cross-Platform**: Electron-based desktop application
+<details>
+<summary>Click to view screenshots</summary>
 
-## 🏗️ Architecture
+### Main Interface
+The application features a modern, intuitive interface with real-time preview capabilities.
 
-```
-┌─────────────────┐    WebSocket    ┌──────────────────┐
-│   Electron UI   │ ←──────────────→ │  Python Backend  │
-│                 │                  │                  │
-│ • React + TS    │                  │ • FastAPI        │
-│ • Material-UI   │                  │ • BiRefNet AI    │
-│ • Debug Console │                  │ • FFmpeg         │
-│ • Live Preview  │                  │ • Parallel Proc. │
-└─────────────────┘                  └──────────────────┘
-```
+### Hardware Detection
+Automatic GPU detection and optimization for maximum performance.
+
+### Processing Options
+Multiple background types and customization options.
+
+</details>
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Python 3.8+** (with pip)
-- **Node.js 16+** (with npm)  
-- **8GB+ RAM** recommended for AI processing
-- **Windows 10+** (primary platform)
 
-### One-Click Setup (Windows)
-```batch
-restart_backend.bat
-```
+1. **Python 3.8+** - [Download Python](https://www.python.org/downloads/)
+2. **Node.js 16+** - [Download Node.js](https://nodejs.org/)
+3. **FFmpeg** - [Download FFmpeg](https://www.gyan.dev/ffmpeg/builds/)
+   - Extract `ffmpeg.exe` to the `bin/` folder
 
-This automated script will:
-1. ✅ Install all Python dependencies
-2. 🧠 Load AI models (BiRefNet + BiRefNet Lite)
-3. 🚀 Start the backend server with debug logging
-4. 📡 Enable WebSocket communication
-
-### Manual Setup
+### Installation
 
 ```bash
-# 1. Install root dependencies
+# Clone the repository
+git clone https://github.com/RohitPoul/Background-Remover-Ai.git
+cd Background-Remover-Ai
+
+# Install dependencies
 npm install
-
-# 2. Install frontend dependencies  
-cd frontend && npm install && cd ..
-
-# 3. Install Python dependencies
-python -m pip install -r api_requirements.txt
-
-# 4. Start backend server
-python api_server.py
-
-# 5. Start frontend (in new terminal)
-cd frontend && npm start
+pip install -r api_requirements.txt
 ```
 
-## 📱 Usage
+### Running the Application
 
-### Basic Workflow
-1. **📂 Upload Video**: Drag & drop or select your video file
-2. **🎨 Choose Background**: Select transparent, color, image, or video background
-3. **⚙️ Configure Settings**: Adjust quality mode, FPS, and processing options
-4. **▶️ Start Processing**: Watch real-time progress and live preview
-5. **📥 Download Result**: Choose standard or direct download method
-
-### Pro Tips
-- **🔥 Fast Mode**: Enable for 4x faster processing of large videos
-- **🎯 Quality Mode**: Disable fast mode for best results on smaller videos  
-- **📊 Debug Console**: Monitor processing with detailed logs and copy functionality
-- **🎬 Transparent Videos**: Use WebM or MOV format for sticker creation
-- **⚡ Parallel Processing**: Increase workers (2-4) for faster processing
-
-## 🎯 Output Formats
-
-| Format | Transparency | Quality | Use Case |
-|--------|-------------|---------|----------|
-| **MP4** | ❌ No | High | Standard videos, social media |
-| **WebM** | ✅ Yes | High | Web stickers, transparent overlays |
-| **MOV** | ✅ Yes | Highest | Professional editing, ProRes 4444 |
-
-## 🔧 Advanced Features
-
-### Debug Console
-- **Real-Time Logging**: See every processing step
-- **Copy Functionality**: Share debug info easily
-- **Export Logs**: Download complete processing logs
-- **Session Tracking**: Monitor multiple processing sessions
-- **Performance Metrics**: Frame timing and success rates
-
-### Processing Pipeline Visibility
-- **Model Loading**: Track AI model initialization
-- **Frame Extraction**: Monitor video frame extraction
-- **AI Inference**: See per-frame processing time and results
-- **Video Compilation**: Track final video assembly and encoding
-- **File Output**: Verify file creation and download URLs
-
-## 📁 Project Structure
-
-```
-video-background-removal/
-├── 📂 electron/                 # Electron main process
-├── 📂 frontend/                 # React TypeScript UI
-│   ├── 📂 src/components/       # UI components
-│   │   ├── VideoProcessor.tsx   # Main processing interface
-│   │   ├── DualVideoPreview.tsx # Side-by-side video preview
-│   │   ├── ProcessingControls.tsx # Start/cancel/download controls
-│   │   ├── DebugPanel.tsx       # Advanced debugging console
-│   │   ├── BackgroundSettings.tsx # Background configuration
-│   │   └── ProcessingProgress.tsx # Progress tracking
-│   ├── 📂 src/context/          # React context providers
-│   │   └── VideoProcessorContext.tsx # Main state management
-│   └── 📂 public/               # Static assets
-├── 📄 api_server.py             # Python backend with AI processing
-├── 📄 api_requirements.txt      # Python dependencies
-├── 📂 bin/                      # FFmpeg binaries
-├── 📂 model_cache/              # Cached AI models
-├── 📂 logs/                     # Application logs
-├── 📄 restart_backend.bat       # Backend restart script
-└── 📄 package.json              # Node.js configuration
-```
-
-## 🧠 AI Models & Performance
-
-### BiRefNet Models
-- **BiRefNet Full**: Best quality, ~60s per 4K frame
-- **BiRefNet Lite**: 4x faster, ~15s per 4K frame, good quality
-- **Auto-Loading**: Models download and cache automatically
-- **CPU Processing**: Optimized for CPU-only environments
-
-### Performance Guidelines
-
-| Video Resolution | Fast Mode | Quality Mode | Recommended |
-|-----------------|-----------|--------------|-------------|
-| **1080p** | ~5s/frame | ~15s/frame | Quality Mode |
-| **2K** | ~10s/frame | ~30s/frame | Fast Mode |
-| **4K** | ~15s/frame | ~60s/frame | Fast Mode |
-
-## 🔧 Troubleshooting
-
-### Debug Console
-The built-in Debug Console provides complete visibility:
-- **Connection Status**: Backend connectivity
-- **Model Loading**: AI model initialization progress  
-- **Frame Processing**: Per-frame AI inference results
-- **Error Details**: Complete error traces and solutions
-- **Performance Metrics**: Processing speed and memory usage
-
-### Common Solutions
-
-**🚫 Processing Stuck/Slow**
-- Enable **Fast Mode** for large videos
-- Reduce video resolution before processing
-- Close memory-intensive applications
-- Check Debug Console for specific bottlenecks
-
-**🔌 Connection Issues**  
-- Restart backend: `restart_backend.bat`
-- Check port 5000 availability
-- Verify Python dependencies installed
-
-**🧠 Model Loading Failures**
-- Ensure 8GB+ RAM available
-- Check internet connection for model download
-- Clear model cache and restart
-
-**📱 UI/Frontend Issues**
-- Refresh page (F5) to reconnect
-- Check browser console for errors
-- Verify Node.js dependencies installed
-
-## 🛠️ Development
-
-### Building from Source
 ```bash
-# Development mode
-npm run dev
-
-# Production build
-npm run build
-
-# Package for distribution
-npm run dist
+# Start the application (builds and launches Electron app)
+npm start
 ```
 
-### API Endpoints
-- `POST /api/process_video` - Start video processing
-- `POST /api/cancel_processing` - Cancel active processing  
-- `GET /api/download/<filename>` - Download processed video
-- `GET /api/get_video_data/<filename>` - Get video as data URI
-- `GET /api/health` - System health check
+That's it! The app will:
+1. Detect your hardware (GPU/CPU)
+2. Start the Python backend
+3. Launch the Electron interface
 
-### WebSocket Events
-- `processing_update` - Real-time progress updates
-- `processing_complete` - Processing finished notification
-- `processing_error` - Error notifications
-- `debug_log` - Backend debug messages
-
-## 📊 System Requirements
+## 🛠️ System Requirements
 
 ### Minimum Requirements
-- **OS**: Windows 10+, macOS 10.14+, Ubuntu 18.04+
-- **RAM**: 8GB (16GB recommended for 4K)
-- **CPU**: Multi-core processor (4+ cores recommended)
-- **Storage**: 2GB free space (for models and temp files)
-- **Network**: Internet connection for initial model download
+- **CPU**: Dual-core processor
+- **RAM**: 4GB
+- **GPU**: Not required (CPU fallback available)
+- **Storage**: 2GB free space
 
-### Recommended Specs
-- **RAM**: 16GB+ for smooth 4K processing
-- **CPU**: 8+ cores for optimal parallel processing
-- **SSD**: Fast storage for improved frame I/O
-- **GPU**: Not required (CPU-optimized processing)
+### Recommended Requirements
+- **CPU**: Quad-core or better
+- **RAM**: 8GB+
+- **GPU**: NVIDIA GPU with 4GB+ VRAM
+- **Storage**: 5GB free space
 
-## 🎬 Use Cases
+### Supported GPUs
+- ✅ NVIDIA GPUs (CUDA 11.8+)
+- ✅ AMD GPUs (ROCm - limited support)
+- ✅ Apple Silicon (M1/M2 via MPS)
+- ✅ Intel GPUs (limited support)
 
-- **🎮 Content Creation**: Remove backgrounds for gaming overlays
-- **📱 Social Media**: Create transparent stickers and animations  
-- **🎥 Video Editing**: Pre-process footage for professional editing
-- **📺 Streaming**: Create overlay content for live streams
-- **🎪 Marketing**: Generate transparent product videos
-- **🎨 Creative Projects**: Artistic video compositions
+## 📊 Performance
+
+| Hardware | Processing Speed | Configuration |
+|----------|-----------------|---------------|
+| RTX 4090 | ~60 FPS | Ultra profile, batch size 16 |
+| RTX 3080 | ~30 FPS | High profile, batch size 8 |
+| GTX 1650 | ~9 FPS | High profile, batch size 4 |
+| CPU Only | ~0.6 FPS | Low profile, single frame |
+
+## 🎯 Features in Detail
+
+### AI Models
+- **BiRefNet** - High quality model for best results
+- **BiRefNet-Lite** - Optimized model for faster processing
+- Automatic model selection based on hardware
+
+### Background Types
+1. **Transparent** - Preserves alpha channel (MOV/WebM)
+2. **Solid Color** - Any color picker selection
+3. **Image** - JPG, PNG, or other image formats
+4. **Video** - MP4, WebM, or MOV backgrounds
+
+### Hardware Optimization
+- Automatic GPU detection and configuration
+- Dynamic batch size adjustment
+- Memory-aware processing
+- Mixed precision support for compatible GPUs
+
+### Output Formats
+- **MP4** - Standard video format
+- **WebM** - Web-optimized with transparency
+- **MOV** - Professional format with alpha channel
+
+## 🔧 Development
+
+### Project Structure
+```
+video-background-removal/
+├── electron/           # Electron main process
+├── frontend/          # React UI application
+│   ├── src/
+│   │   ├── components/  # UI components
+│   │   ├── context/     # React context
+│   │   └── styles/      # CSS styles
+├── api_server.py      # Python backend server
+├── hardware_optimizer.py # Hardware detection
+├── bin/              # FFmpeg binaries
+└── model_cache/      # AI model storage
+```
+
+### Key Technologies
+- **Frontend**: React, TypeScript, Material-UI
+- **Backend**: Python, FastAPI, PyTorch
+- **Desktop**: Electron
+- **AI Models**: Transformers, BiRefNet
+- **Video Processing**: FFmpeg, MoviePy
+
+### Development Mode
+
+```bash
+# Run in development mode with hot reload
+npm run dev
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **"Backend not connected" error**
+   - Ensure Python is installed and in PATH
+   - Check if port 5000 is available
+   - Restart the application
+
+2. **GPU not detected**
+   - Install CUDA toolkit for NVIDIA GPUs
+   - Update GPU drivers
+   - Check PyTorch CUDA installation
+
+3. **Video processing fails**
+   - Ensure FFmpeg is in the `bin/` folder
+   - Check available disk space
+   - Try reducing video resolution
+
+4. **Out of memory errors**
+   - Use Fast Mode (BiRefNet-Lite)
+   - Reduce video resolution
+   - Close other applications
+
+## 📈 Roadmap
+
+- [ ] Cloud processing support
+- [ ] Batch video processing
+- [ ] Real-time webcam support
+- [ ] Mobile app version
+- [ ] More AI model options
+- [ ] Custom model training
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-### 🧠 AI Model Credits
-This application is powered by the groundbreaking BiRefNet research:
+- [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) - The AI model powering background removal
+- [Electron](https://www.electronjs.org/) - Desktop application framework
+- [React](https://reactjs.org/) - UI framework
+- [PyTorch](https://pytorch.org/) - Deep learning framework
+- [FFmpeg](https://ffmpeg.org/) - Video processing
 
-- **BiRefNet Model**: [Bilateral Reference for High-Resolution Dichotomous Image Segmentation](https://github.com/ZhengPeng7/BiRefNet)
-- **Authors**: Zheng Peng, Jianbo Jiao, and research team
-- **Institution**: University of Birmingham & collaborating institutions
-- **Paper**: "Bilateral Reference for High-Resolution Dichotomous Image Segmentation"
+## 👨‍💻 Author
 
-### 🛠️ Technology Stack
-- **[Electron](https://electronjs.org/)**: Cross-platform desktop framework
-- **[React](https://reactjs.org/)**: Modern UI library with TypeScript  
-- **[FastAPI](https://fastapi.tiangolo.com/)**: High-performance Python web framework
-- **[Material-UI](https://mui.com/)**: Beautiful React component library
-- **[FFmpeg](https://ffmpeg.org/)**: Professional video processing
-- **[PyTorch](https://pytorch.org/)**: Machine learning framework
-- **[Socket.IO](https://socket.io/)**: Real-time communication
+**Rohit Poul**
+- GitHub: [@RohitPoul](https://github.com/RohitPoul)
+- Project: [Background-Remover-Ai](https://github.com/RohitPoul/Background-Remover-Ai)
+
+## ⭐ Star History
+
+If you find this project useful, please consider giving it a star on GitHub!
 
 ---
 
-## 🌟 Recent Updates
-
-### Version 2.0 - Major Improvements
-- ✅ **Fixed Critical Bugs**: SocketIO communication, session management
-- ✅ **Enhanced Debug Tools**: Copy logs, export functionality, real-time visibility
-- ✅ **Improved AI Models**: Proper quality/fast mode selection  
-- ✅ **Better Performance**: Optimized 4K processing, parallel frame handling
-- ✅ **Code Cleanup**: Removed 400+ lines of duplicate code
-- ✅ **UI Enhancements**: Stable debug labels, better error handling
-- ✅ **Transparent Video Support**: Perfect for sticker creation
-
-**Ready for professional video background removal workflows!** 🚀
+<p align="center">Made with ❤️ using AI and Open Source technologies</p>

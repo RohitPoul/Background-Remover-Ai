@@ -195,16 +195,16 @@ export default function BackgroundSettings() {
             </Typography>
             <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
               Background will be removed with alpha channel preserved.
-              Output will be in WebM or MOV format for transparency support.
+              Output will be in MOV or WebM format for transparency support.
             </Typography>
             <Chip
-              label="Recommended: WebM format"
+              label="Recommended: MOV format"
               color="primary"
               size="small"
               sx={{ mr: 1 }}
             />
             <Chip
-              label="Alternative: MOV with ProRes"
+              label="Alternative: WebM"
               color="default"
               size="small"
             />

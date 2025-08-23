@@ -46,11 +46,28 @@ temp_output_*.mov
 *.processed.mp4
 *.processed.webm
 *.processed.mov
+temp_output_*_transparent.mov
+temp_output_*_preview.webm
+
+# Frame directories (temporary processing)
+frames_*/
+frame_*.png
+frame_*.jpg
+
+# Temporary video files
+input_*.mp4
+input_*.webm
+input_*.mov
+bg_*.*
+temp_video_*.mp4
 
 # Debug frames and helper files (for research and debugging only)
 debug_frames/
 debug_frames.py
 debug_frames_helper.py
+
+# Hardware settings (user-specific)
+hardware_settings.json
 
 # Binary files
 bin/

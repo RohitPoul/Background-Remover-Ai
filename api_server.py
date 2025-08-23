@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-from transformers import AutoModelForImageSegmentation
+from transformers import AutoModelForImageSegmentation, AutoImageProcessor
 import torch
 from torchvision import transforms
 from PIL import Image
@@ -15,6 +15,8 @@ import sys
 import gc
 import threading
 from concurrent.futures import ThreadPoolExecutor
+# Optimization modules removed - using built-in optimizations
+OPTIMIZATIONS_AVAILABLE = False
 from moviepy.editor import VideoFileClip, ImageSequenceClip, concatenate_videoclips, vfx
 from werkzeug.utils import secure_filename
 
@@ -63,13 +65,66 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
                    ping_timeout=60, ping_interval=25,
                    allow_upgrades=False) # Prevent WebSocket upgrade issues
 
-# Optimize memory usage
-torch.set_float32_matmul_precision("medium")
-torch.set_num_threads(2)  # Limit CPU threads to reduce memory usage
+# Debug mode - set to False for production to reduce overhead
+DEBUG_MODE = False  # Disable verbose debugging to save resources
 
-# Force CPU to avoid GPU memory issues
-device = "cpu"  # Always use CPU to avoid GPU memory allocation issues
-# Note: debug_log isn't available yet here, will be initialized later
+# Import hardware optimizer
+try:
+    from hardware_optimizer import get_hardware_optimizer
+    hardware_optimizer = get_hardware_optimizer()
+    hw_settings = hardware_optimizer.get_optimized_settings()
+    hardware_optimizer.print_optimization_report()
+except Exception as e:
+    print(f"Warning: Could not load hardware optimizer: {e}")
+    print("Using default settings...")
+    hw_settings = {
+        'device': 'cpu',
+        'torch_threads': 2,
+        'max_workers': 2,
+        'batch_size': 1,
+        'frame_buffer_size': 30,
+        'use_mixed_precision': False,
+        'use_model_quantization': False,
+        'model_preference': 'fast'
+    }
+
+# Configure PyTorch based on hardware
+torch.set_float32_matmul_precision("high" if hw_settings['device'] != 'cpu' else "medium")
+torch.set_num_threads(hw_settings['torch_threads'])
+torch.set_num_interop_threads(hw_settings['torch_threads'])
+
+# Enable CPU optimizations if needed
+if hw_settings['device'] == 'cpu':
+    try:
+        torch.set_flush_denormal(True)
+    except:
+        pass
+
+# Set device based on hardware detection
+# Force reload hardware settings to detect GPU
+try:
+    hardware_optimizer = get_hardware_optimizer()
+    hw_settings = hardware_optimizer.get_optimized_settings()
+    hardware_optimizer.print_optimization_report()
+except:
+    pass
+
+device = hw_settings['device']
+print(f"Using device: {device}")
+
+# Verify CUDA is actually available
+if device == 'cuda' and not torch.cuda.is_available():
+    print("Warning: CUDA requested but not available, falling back to CPU")
+    device = 'cpu'
+
+# Global settings from hardware optimizer
+MAX_BATCH_SIZE = hw_settings['batch_size'] if device != 'cpu' else 1
+FRAME_BUFFER_SIZE = hw_settings['frame_buffer_size']
+USE_MIXED_PRECISION = hw_settings['use_mixed_precision'] and device == 'cuda'
+USE_QUANTIZATION = hw_settings['use_model_quantization']
+MODEL_PREFERENCE = hw_settings['model_preference']
+
+print(f"Settings: Batch size={MAX_BATCH_SIZE}, Mixed precision={USE_MIXED_PRECISION}")
 
 # Model cache directory
 MODEL_CACHE_DIR = "./model_cache"
@@ -165,24 +220,80 @@ def cleanup_on_exit():
 # Register cleanup function
 atexit.register(cleanup_on_exit)
 
+def quantize_model(model):
+    """Apply quantization to reduce memory and improve speed"""
+    if not USE_QUANTIZATION:
+        return model
+    
+    try:
+        if device == "cpu":
+            # Dynamic quantization for CPU
+            import torch.quantization as quantization
+            model_int8 = quantization.quantize_dynamic(
+                model, {torch.nn.Linear, torch.nn.Conv2d}, dtype=torch.qint8
+            )
+            print("Model quantized for CPU (INT8)")
+            return model_int8
+        elif device == "cuda":
+            # Half precision for GPU - much faster on GTX 1650
+            model = model.half()
+            print("Model converted to FP16 for GPU acceleration")
+            return model
+        else:
+            return model
+    except Exception as e:
+        print(f"Warning: Could not quantize model: {e}")
+        return model
+
 def preload_models():
-    """Preload ONLY lite model for faster startup"""
+    """Preload models based on hardware capabilities"""
     global models_loaded, birefnet, birefnet_lite
     
     if models_loaded:
         return True
     
     try:
-        # Only load lite model for faster startup
-        if birefnet_lite is None:
-            print("Loading BiRefNet_lite model...")
-            birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
-                "ZhengPeng7/BiRefNet_lite",
-                trust_remote_code=True,
-                cache_dir=MODEL_CACHE_DIR
-            )
-            birefnet_lite.to(device).eval()
-            print("Model ready!")
+        # Load models based on hardware profile
+        if MODEL_PREFERENCE in ['ultra_fast', 'fast'] or hw_settings.get('profile') in ['low', 'potato']:
+            # Only load lite model for low-end systems
+            if birefnet_lite is None:
+                print("Loading BiRefNet_lite model (optimized for your hardware)...")
+                birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
+                    "ZhengPeng7/BiRefNet_lite",
+                    trust_remote_code=True,
+                    cache_dir=MODEL_CACHE_DIR
+                )
+                birefnet_lite.to(device).eval()
+                
+                # Apply quantization if needed
+                birefnet_lite = quantize_model(birefnet_lite)
+                print("Lite model ready!")
+        else:
+            # Load both models for high-end systems
+            if birefnet_lite is None:
+                print("Loading BiRefNet_lite model...")
+                birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
+                    "ZhengPeng7/BiRefNet_lite",
+                    trust_remote_code=True,
+                    cache_dir=MODEL_CACHE_DIR
+                )
+                birefnet_lite.to(device).eval()
+                birefnet_lite = quantize_model(birefnet_lite)
+                
+            if birefnet is None and hw_settings.get('profile') in ['ultra', 'high']:
+                print("Loading BiRefNet full model for quality mode...")
+                try:
+                    birefnet = AutoModelForImageSegmentation.from_pretrained(
+                        "ZhengPeng7/BiRefNet",
+                        trust_remote_code=True,
+                        cache_dir=MODEL_CACHE_DIR
+                    )
+                    birefnet.to(device).eval()
+                    birefnet = quantize_model(birefnet)
+                    print("Full model ready!")
+                except Exception as e:
+                    print(f"Could not load full model: {e}")
+                    birefnet = None
         
         models_loaded = True
         return True
@@ -336,6 +447,43 @@ def cleanup_all_temp_files():
     
     print("Temp file cleanup complete")
 
+def process_frames_batch_gpu(frames, model, batch_size=4):
+    """Process multiple frames in batches on GPU for better performance"""
+    if device != "cuda" or not frames:
+        return None
+    
+    try:
+        processor = AutoImageProcessor.from_pretrained("ZhengPeng7/BiRefNet_lite", trust_remote_code=True)
+        results = []
+        
+        for i in range(0, len(frames), batch_size):
+            batch = frames[i:min(i+batch_size, len(frames))]
+            
+            # Prepare batch
+            batch_inputs = processor(images=batch, return_tensors="pt")
+            batch_inputs = {k: v.to(device) for k, v in batch_inputs.items()}
+            
+            # Process batch
+            with torch.no_grad():
+                if USE_MIXED_PRECISION:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(**batch_inputs)
+                else:
+                    outputs = model(**batch_inputs)
+            
+            # Extract predictions
+            predictions = outputs.logits.sigmoid()
+            
+            for pred in predictions:
+                # Convert to mask
+                mask = (pred.squeeze().cpu().numpy() * 255).astype(np.uint8)
+                results.append(mask)
+        
+        return results
+    except Exception as e:
+        print(f"GPU batch processing failed: {e}")
+        return None
+
 def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, background_frames, color):
     """Simplified frame processing that maintains consistent dimensions"""
     try:
@@ -432,6 +580,8 @@ def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, backgrou
 
 # REMOVED DUPLICATE - Using process_frame_simple instead
 
+
+
 def process_image(image, bg, fast_mode=False, transparent=False):
     """
     Process an image by removing its background and replacing with the specified background.
@@ -447,8 +597,16 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     # Check if models are loaded
     debug_log(f"[AI] Model status - birefnet: {'Loaded' if birefnet is not None else 'Not loaded'}, birefnet_lite: {'Loaded' if birefnet_lite is not None else 'Not loaded'}", "ai_process")
     
+    # Caching disabled for simplicity
+    
     debug_log(f"[AI] Preparing image tensor for AI model...", "ai_process")
     input_images = transform_image(image).unsqueeze(0).to(device)
+    
+    # Use mixed precision if enabled
+    if USE_MIXED_PRECISION and device != 'cpu':
+        with torch.cuda.amp.autocast():
+            input_images = input_images.half()
+    
     debug_log(f"[AI] Input tensor created - shape: {input_images.shape}, device: {device}", "ai_process")
     
     # FIXED MODEL SELECTION: Use BiRefNet for quality, BiRefNet_lite for fast
@@ -471,7 +629,15 @@ def process_image(image, bg, fast_mode=False, transparent=False):
         with torch.no_grad():
             debug_log("[AI] Running AI inference to detect foreground...", "ai_process")
             start_inference = time.time()
-            preds = model(input_images)[-1].sigmoid().cpu()
+            
+            # Use mixed precision if available
+            if USE_MIXED_PRECISION and device != 'cpu':
+                with torch.cuda.amp.autocast():
+                    preds = model(input_images)[-1].sigmoid()
+            else:
+                preds = model(input_images)[-1].sigmoid()
+            
+            preds = preds.cpu()
             inference_time = time.time() - start_inference
             debug_log(f"[AI] AI inference complete in {inference_time:.2f}s - predictions shape: {preds.shape}", "ai_process")
     except Exception as e:
@@ -615,8 +781,8 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         audio = video.audio
         debug_log(f"[{session_id}] Loading video frames...", session_id)
         
-        # Load all frames at once like the original Gradio implementation
-        debug_log(f"[{session_id}] Loading all video frames...", session_id)
+        # Load frames based on available memory
+        debug_log(f"[{session_id}] Loading video frames...", session_id)
         frames = list(video.iter_frames(fps=fps))
         total_frames = len(frames)
         debug_log(f"[{session_id}] Total frames to process: {total_frames}", session_id)
@@ -1043,27 +1209,22 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
 
                         debug_log(f"[{session_id}] 🎞️ CODEC SELECTION:", session_id)
                         debug_log(f"[{session_id}]   - use_webm = {use_webm}", session_id)
+                        # Use standard encoding
                         if use_webm:
                             debug_log(f"[{session_id}]   ✅ USING WEBM WITH VP9 TRANSPARENCY", session_id)
-                            # VP9 is the ONLY codec we use for WebM transparency
                             ffmpeg_cmd.extend([
-                                '-c:v', 'libvpx-vp9',       # VP9 codec - modern standard for WebM
-                                '-pix_fmt', 'yuva420p',     # Alpha channel pixel format
-                                '-b:v', '0',                # Required for CRF mode
-                                '-crf', '10',               # Quality level (lower = better, 0-63)
-                                '-row-mt', '1'              # Multithreading for faster encoding
+                                '-c:v', 'libvpx-vp9',
+                                '-pix_fmt', 'yuva420p',
+                                '-b:v', '0',
+                                '-crf', '10',
+                                '-row-mt', '1'
                             ])
-                            debug_log(f"[{session_id}]   - Codec: libvpx-vp9 (VP9)", session_id)
-                            debug_log(f"[{session_id}]   - Pixel format: yuva420p (with alpha)", session_id)
-                            debug_log(f"[{session_id}]   - Quality: CRF 10 with -b:v 0", session_id)
                         else:
                             debug_log(f"[{session_id}]   ✅ USING MOV PATH WITH TRANSPARENCY", session_id)
-                            # MOV with PNG codec as fallback
                             ffmpeg_cmd.extend([
-                                '-c:v', 'png',  # PNG codec preserves alpha perfectly
-                                '-pred', 'mixed'  # Better PNG compression
+                                '-c:v', 'png',
+                                '-pred', 'mixed'
                             ])
-                            debug_log(f"[{session_id}]   - Codec: png (preserves alpha)", session_id)
                         
                         # AUDIO DISABLED FOR DEBUGGING TRANSPARENCY!
                         # if audio is not None:
@@ -1593,17 +1754,20 @@ def process_video():
         debug_log(f"  - Raw value: '{output_format}'", session_id)
         debug_log(f"  - Lowercase: '{output_format.lower()}'", session_id)
         debug_log(f"  - Is 'webm'? {output_format.lower() == 'webm'}", session_id)
-        # Get max_workers parameter - default to 4 for parallel processing 
+        # Get max_workers from hardware optimizer
         try:
-            max_workers = int(request.form.get('max_workers', 4))
-            # Limit to reasonable value based on CPU cores
-            import multiprocessing
-            cpu_count = multiprocessing.cpu_count()
-            max_workers = min(max_workers, max(1, cpu_count - 1))  # Use at most CPU count - 1
-            debug_log(f"Using max_workers={max_workers} (system has {cpu_count} CPU cores)", session_id)
+            # Use hardware-optimized worker count
+            max_workers_requested = int(request.form.get('max_workers', 0))
+            if max_workers_requested > 0:
+                # User specified a value, but cap it based on hardware
+                max_workers = min(max_workers_requested, hw_settings.get('max_workers', 4))
+            else:
+                # Use hardware-optimized default
+                max_workers = hw_settings.get('max_workers', 4)
+            debug_log(f"Using max_workers={max_workers} (optimized for your hardware)", session_id)
         except Exception as e:
-            debug_log(f"Error setting max_workers: {e}, defaulting to 4", session_id)
-            max_workers = 4
+            debug_log(f"Error setting max_workers: {e}, using hardware default", session_id)
+            max_workers = hw_settings.get('max_workers', 2)
         
         if not video_file:
             return jsonify({'error': 'No video file provided'}), 400
@@ -1615,6 +1779,8 @@ def process_video():
         
         # Track temp file for cleanup
         temp_files.add(video_path)
+        
+        # Video resolution optimization can be added here if needed in future
         
         # Handle background file if provided
         bg_path = None
@@ -1704,6 +1870,10 @@ def send_debug_to_frontend(session_id, message):
 # Global debug function that sends all messages to frontend
 def debug_log(message, session_id=None):
     """Send debug message to both console and frontend"""
+    # Skip most debug messages if not in debug mode (except critical ones)
+    if not DEBUG_MODE and session_id not in ['system', 'download', 'frame_serve']:
+        return
+    
     if session_id is None:
         session_id = 'system'
     
@@ -1962,6 +2132,55 @@ def test_endpoint():
         'models_available': models_available,
         'models_loaded': models_loaded
     })
+
+@app.route('/api/hardware_status', methods=['GET'])
+def hardware_status():
+    """Get current hardware configuration and status"""
+    try:
+        # Get GPU name if available
+        gpu_name = "Not Available"
+        if device == 'cuda' and torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+        elif device == 'mps':
+            gpu_name = "Apple M1/M2 GPU"
+        
+        # Get current memory usage
+        import psutil
+        memory = psutil.virtual_memory()
+        
+        return jsonify({
+            'status': 'ok',
+            'hardware': {
+                'processing_device': device.upper(),
+                'gpu_name': gpu_name,
+                'gpu_available': torch.cuda.is_available(),
+                'cpu_cores': psutil.cpu_count(logical=False),
+                'cpu_threads': psutil.cpu_count(logical=True),
+                'memory_gb': round(memory.total / (1024**3), 1),
+                'memory_available_gb': round(memory.available / (1024**3), 1),
+                'memory_usage_percent': memory.percent
+            },
+            'settings': {
+                'batch_size': MAX_BATCH_SIZE,
+                'max_workers': hw_settings.get('max_workers', 2),
+                'mixed_precision': USE_MIXED_PRECISION,
+                'model_quantization': USE_QUANTIZATION,
+                'model_preference': MODEL_PREFERENCE,
+                'optimization_profile': hw_settings.get('profile', 'unknown')
+            },
+            'models': {
+                'birefnet_loaded': birefnet is not None,
+                'birefnet_lite_loaded': birefnet_lite is not None,
+                'models_available': models_available,
+                'models_loaded': models_loaded
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'processing_device': device
+        })
 
 @app.route('/api/reset_models', methods=['POST'])
 def reset_models():

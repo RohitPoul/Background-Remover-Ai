@@ -26,6 +26,7 @@ import BackgroundSettings from './BackgroundSettings';
 import ProcessingControls from './ProcessingControls';
 import DualVideoPreview from './DualVideoPreview';
 import ProcessingProgress from './ProcessingProgress';
+import HardwareStatus from './HardwareStatus';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 const steps = [
@@ -117,6 +118,11 @@ export default function VideoProcessor() {
           </Stepper>
         </CardContent>
       </Card>
+
+      {/* Hardware Status Indicator */}
+      <Box sx={{ mb: 3 }}>
+        <HardwareStatus />
+      </Box>
 
       <Grid container spacing={3}>
         {/* Left Panel - Upload and Settings */}

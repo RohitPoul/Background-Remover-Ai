@@ -1,0 +1,123 @@
+/* Global Smooth Transitions */
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Material-UI component transitions */
+.MuiPaper-root,
+.MuiCard-root,
+.MuiButton-root,
+.MuiIconButton-root,
+.MuiChip-root,
+.MuiMenuItem-root {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Fade animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Smooth hover effects */
+.MuiButton-root:hover,
+.MuiIconButton-root:hover,
+.MuiCard-root:hover {
+  transition-duration: 0.2s !important;
+}
+
+/* Smooth color transitions */
+.MuiChip-root,
+.MuiTypography-root {
+  transition: color 0.3s ease, background-color 0.3s ease !important;
+}
+
+/* Smooth slider transitions */
+.MuiSlider-root .MuiSlider-thumb,
+.MuiSlider-root .MuiSlider-track {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Smooth progress transitions */
+.MuiLinearProgress-bar,
+.MuiCircularProgress-svg {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Video transitions */
+video {
+  transition: opacity 0.5s ease !important;
+}
+
+/* Image transitions */
+img {
+  transition: opacity 0.3s ease, transform 0.3s ease !important;
+}
+
+/* Prevent janky transitions on load */
+.preload * {
+  -webkit-transition: none !important;
+  -moz-transition: none !important;
+  -ms-transition: none !important;
+  -o-transition: none !important;
+  transition: none !important;
+}
+
+/* Smooth box shadow transitions */
+.MuiPaper-elevation1,
+.MuiPaper-elevation2,
+.MuiPaper-elevation3,
+.MuiPaper-elevation4 {
+  transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Hardware status smooth transitions */
+.hardware-status-indicator {
+  animation: fadeInScale 0.6s ease-out;
+}
+
+/* Frame slider smooth transitions */
+.frame-slider-container {
+  transition: all 0.3s ease !important;
+}
+
+/* Smooth menu transitions */
+.MuiMenu-paper {
+  transition: opacity 0.3s ease, transform 0.3s ease !important;
+}
+
+/* Smooth stepper transitions */
+.MuiStepIcon-root {
+  transition: all 0.3s ease !important;
+}
+
+.MuiStepConnector-line {
+  transition: border-color 0.3s ease !important;
+}

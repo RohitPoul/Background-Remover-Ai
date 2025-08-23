@@ -3,11 +3,9 @@ import {
   Box, 
   Slider, 
   Typography, 
-  IconButton, 
-  Paper,
+  IconButton,
   Tooltip,
-  Chip,
-  CircularProgress
+  Chip
 } from '@mui/material';
 import {
   SkipPrevious as PrevIcon,
@@ -27,32 +25,9 @@ export default function FrameSlider() {
     currentFrame,
     totalFrames,
     processingStatus,
-    backgroundType,
   } = useVideoProcessor();
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [frameImageUrl, setFrameImageUrl] = useState<string>('');
-  const [isLoadingFrame, setIsLoadingFrame] = useState(false);
-
-  const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
-
-  // Debug log for processed frames
-  useEffect(() => {
-    if (processedFrames.length > 0) {
-      console.log(`🎞️ [FrameSlider] processedFrames updated: ${processedFrames.length} frames`);
-      console.log('🎞️ [FrameSlider] First frame URL:', processedFrames[0]);
-    }
-  }, [processedFrames]);
-
-  // Load frame image when selection changes
-  useEffect(() => {
-    if (processedFrames.length > 0 && selectedFrameIndex < processedFrames.length) {
-      const frameUrl = `${API_BASE}${processedFrames[selectedFrameIndex]}`;
-      console.log(`🖼️ [FrameSlider] Loading frame ${selectedFrameIndex + 1}: ${frameUrl}`);
-      setIsLoadingFrame(true);
-      setFrameImageUrl(frameUrl);
-    }
-  }, [selectedFrameIndex, processedFrames, API_BASE]);
 
   // Auto-play functionality
   useEffect(() => {
@@ -118,13 +93,10 @@ export default function FrameSlider() {
   }
 
   return (
-    <Paper sx={{ p: 2, bgcolor: 'rgba(0,0,0,0.3)' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          Frame Preview
-        </Typography>
+    <Box sx={{ bgcolor: 'rgba(0,0,0,0.2)', p: 1, borderRadius: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Chip 
-          label={`${selectedFrameIndex + 1} / ${processedFrames.length || totalFrames}`}
+          label={`Frame ${selectedFrameIndex + 1} / ${processedFrames.length || totalFrames}`}
           size="small"
           color={processingStatus === 'processing' ? 'warning' : 'success'}
         />
@@ -134,52 +106,6 @@ export default function FrameSlider() {
           </Typography>
         )}
       </Box>
-
-      {/* Frame Display */}
-      {frameImageUrl && (
-        <Box 
-          sx={{ 
-            position: 'relative',
-            width: '100%', 
-            height: 300, 
-            mb: 2,
-            background: backgroundType === 'Transparent' ? 
-              'repeating-conic-gradient(#808080 0% 25%, transparent 0% 50%) 50% / 20px 20px' : 
-              'transparent',
-            borderRadius: 1,
-            overflow: 'hidden',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {isLoadingFrame && (
-            <CircularProgress 
-              size={40} 
-              sx={{ position: 'absolute', zIndex: 1 }} 
-            />
-          )}
-          <img 
-            src={frameImageUrl}
-            alt={`Frame ${selectedFrameIndex + 1}`}
-            style={{ 
-              width: '100%', 
-              height: '100%', 
-              objectFit: 'contain',
-              opacity: isLoadingFrame ? 0.5 : 1,
-              transition: 'opacity 0.2s',
-            }}
-            onLoad={() => {
-              console.log(`✅ [FrameSlider] Frame loaded successfully: ${frameImageUrl}`);
-              setIsLoadingFrame(false);
-            }}
-            onError={(e) => {
-              console.error(`❌ [FrameSlider] Error loading frame: ${frameImageUrl}`, e);
-              setIsLoadingFrame(false);
-            }}
-          />
-        </Box>
-      )}
 
       {/* Slider Control */}
       <Box sx={{ px: 2 }}>
@@ -203,7 +129,7 @@ export default function FrameSlider() {
       </Box>
 
       {/* Playback Controls */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, mt: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mt: 1 }}>
         <Tooltip title="First Frame">
           <span>
             <IconButton 
@@ -266,17 +192,6 @@ export default function FrameSlider() {
         </Tooltip>
       </Box>
 
-      {/* Frame Info */}
-      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', px: 1 }}>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {processedFrames.length} frames processed
-        </Typography>
-        {processingStatus === 'processing' && (
-          <Typography variant="caption" sx={{ color: 'warning.main' }}>
-            Live preview - check quality before completion
-          </Typography>
-        )}
-      </Box>
-    </Paper>
+    </Box>
   );
 }
