@@ -65,8 +65,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
                    ping_timeout=60, ping_interval=25,
                    allow_upgrades=False) # Prevent WebSocket upgrade issues
 
-# Debug mode - set to False for production to reduce overhead
-DEBUG_MODE = False  # Disable verbose debugging to save resources
+# Debug mode - set to True to debug GPU detection issues
+DEBUG_MODE = True  # Enable full debugging to identify GPU issues [[memory:6712208]]
 
 # Import hardware optimizer
 try:
@@ -101,27 +101,70 @@ if hw_settings['device'] == 'cpu':
         pass
 
 # Set device based on hardware detection
-# First check if CUDA is actually available
-if torch.cuda.is_available():
-    device = 'cuda'
-    print(f"✅ CUDA is available! Using GPU: {torch.cuda.get_device_name(0)}")
-    # Update hw_settings to reflect actual GPU availability
-    hw_settings['device'] = 'cuda'
-    # Force reload hardware settings to get GPU-optimized parameters
+print("\n" + "="*60)
+print("GPU DETECTION DEBUG LOG")
+print("="*60)
+
+# Step 1: Check PyTorch version and CUDA compilation
+print(f"1. PyTorch version: {torch.__version__}")
+print(f"2. PyTorch compiled with CUDA: {torch.version.cuda if hasattr(torch.version, 'cuda') else 'No CUDA support'}")
+
+# Step 2: Check if CUDA is available
+cuda_available = torch.cuda.is_available()
+print(f"3. torch.cuda.is_available(): {cuda_available}")
+
+if cuda_available:
+    # Step 3: Get GPU details
+    print(f"4. Number of GPUs: {torch.cuda.device_count()}")
+    print(f"5. Current GPU index: {torch.cuda.current_device()}")
+    print(f"6. GPU Name: {torch.cuda.get_device_name(0)}")
+    print(f"7. GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+    
+    # Step 4: Test GPU tensor creation
     try:
-        hardware_optimizer = get_hardware_optimizer()
-        gpu_settings = hardware_optimizer.get_optimized_settings()
-        if gpu_settings['device'] == 'cuda':
-            hw_settings.update(gpu_settings)
-            print(f"Loaded GPU-optimized settings: batch_size={hw_settings['batch_size']}, workers={hw_settings['max_workers']}")
-    except:
-        pass
+        test_tensor = torch.zeros(1, 1).cuda()
+        print(f"8. Test tensor on GPU: Success - {test_tensor.device}")
+        del test_tensor
+    except Exception as e:
+        print(f"8. Test tensor on GPU: Failed - {e}")
+        cuda_available = False
+    
+    if cuda_available:
+        device = 'cuda'
+        print(f"\nGPU DETECTED AND WORKING! Using: {torch.cuda.get_device_name(0)}")
+        
+        # Update hw_settings to reflect actual GPU availability
+        hw_settings['device'] = 'cuda'
+        
+        # Force reload hardware settings to get GPU-optimized parameters
+        try:
+            hardware_optimizer = get_hardware_optimizer()
+            gpu_settings = hardware_optimizer.get_optimized_settings()
+            if gpu_settings['device'] == 'cuda':
+                hw_settings.update(gpu_settings)
+                print(f"9. Loaded GPU-optimized settings:")
+                print(f"   - Batch size: {hw_settings['batch_size']}")
+                print(f"   - Workers: {hw_settings['max_workers']}")
+                print(f"   - Mixed precision: {hw_settings.get('use_mixed_precision', False)}")
+        except Exception as e:
+            print(f"9. Failed to load GPU settings: {e}")
+    else:
+        device = 'cpu'
+        print("\nWarning: GPU detected but not functional, falling back to CPU")
+        hw_settings['device'] = 'cpu'
 else:
     device = 'cpu'
-    print("⚠️ CUDA not available, using CPU")
+    print("\nWarning: CUDA not available, using CPU")
+    print("Possible reasons:")
+    print("  - No NVIDIA GPU present")
+    print("  - NVIDIA drivers not installed")
+    print("  - PyTorch installed without CUDA support")
+    print("  - CUDA version mismatch")
     hw_settings['device'] = 'cpu'
 
-print(f"Using device: {device}")
+print("="*60)
+print(f"FINAL DEVICE: {device}")
+print("="*60 + "\n")
 
 # Global settings from hardware optimizer
 MAX_BATCH_SIZE = hw_settings['batch_size'] if device != 'cpu' else 1
@@ -258,6 +301,17 @@ def preload_models():
     if models_loaded:
         return True
     
+    print("\n" + "="*60)
+    print("MODEL LOADING DEBUG LOG")
+    print("="*60)
+    print(f"Device for models: {device}")
+    print(f"Hardware profile: {hw_settings.get('profile', 'unknown')}")
+    print(f"Model preference: {MODEL_PREFERENCE}")
+    print(f"CUDA available at model load: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"GPU for models: {torch.cuda.get_device_name(0)}")
+    print("="*60)
+    
     try:
         # Load models based on hardware profile
         if MODEL_PREFERENCE in ['ultra_fast', 'fast'] or hw_settings.get('profile') in ['low', 'potato']:
@@ -277,16 +331,31 @@ def preload_models():
         else:
             # Load both models for high-end systems
             if birefnet_lite is None:
-                print(f"Loading BiRefNet_lite model to {device}...")
+                print(f"Loading BiRefNet_lite model...")
+                print(f"Target device: {device}")
                 birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
                     "ZhengPeng7/BiRefNet_lite",
                     trust_remote_code=True,
                     cache_dir=MODEL_CACHE_DIR
                 )
+                print(f"Model loaded, moving to device: {device}")
                 birefnet_lite = birefnet_lite.to(device)
                 birefnet_lite.eval()
+                
+                # Verify model is on correct device
+                if hasattr(birefnet_lite, 'device'):
+                    print(f"Model device after .to(): {birefnet_lite.device}")
+                
+                # Check a parameter to verify device
+                for name, param in list(birefnet_lite.named_parameters())[:1]:
+                    print(f"First parameter '{name}' is on: {param.device}")
+                    break
+                
                 if device == 'cuda':
-                    print(f"✅ BiRefNet_lite loaded to GPU: {torch.cuda.get_device_name(0)}")
+                    print(f" BiRefNet_lite loaded to GPU: {torch.cuda.get_device_name(0)}")
+                else:
+                    print(f"Model loaded to: {device}")
+                    
                 birefnet_lite = quantize_model(birefnet_lite)
                 
             if birefnet is None and hw_settings.get('profile') in ['ultra', 'high']:
@@ -554,16 +623,16 @@ def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, backgrou
         
         # Fix transparency consistency issues
         if result.shape[2] == 4:  # RGBA with transparency
-            debug_log(f"[FRAME {frame_id}] ✅ RGBA image with transparency created", "frame_process")
+            debug_log(f"[FRAME {frame_id}]  RGBA image with transparency created", "frame_process")
             # Check if alpha channel has actual transparency data
             alpha = result[:, :, 3]
             unique_alpha_values = len(np.unique(alpha))
             debug_log(f"[FRAME {frame_id}] Alpha channel has {unique_alpha_values} unique values", "frame_process")
             
             if unique_alpha_values <= 1:
-                debug_log(f"[FRAME {frame_id}] ⚠️ WARNING: Alpha channel is uniform (no transparency variation)", "frame_process")
+                debug_log(f"[FRAME {frame_id}] Warning: WARNING: Alpha channel is uniform (no transparency variation)", "frame_process")
         elif frame.shape != result.shape:
-            debug_log(f"[FRAME {frame_id}] ✅ Shape changed: {frame.shape} -> {result.shape}", "frame_process")
+            debug_log(f"[FRAME {frame_id}]  Shape changed: {frame.shape} -> {result.shape}", "frame_process")
         else:
             # Compare pixels to see if they changed
             try:
@@ -575,7 +644,7 @@ def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, backgrou
                     debug_log(f"[FRAME {frame_id}] ❌ WARNING: Frame appears UNCHANGED! Less than 1% different!", "frame_process")
                     debug_log(f"[FRAME {frame_id}] POSSIBLE BACKGROUND REMOVAL FAILURE", "frame_process")
                 else:
-                    debug_log(f"[FRAME {frame_id}] ✅ Frame successfully modified, {pixel_diff_pct:.2f}% pixels changed", "frame_process")
+                    debug_log(f"[FRAME {frame_id}]  Frame successfully modified, {pixel_diff_pct:.2f}% pixels changed", "frame_process")
             except Exception as comp_err:
                 debug_log(f"[FRAME {frame_id}] Could not compare pixel differences: {comp_err}", "frame_process")
         
@@ -609,14 +678,19 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     # Caching disabled for simplicity
     
     debug_log(f"[AI] Preparing image tensor for AI model...", "ai_process")
-    input_images = transform_image(image).unsqueeze(0).to(device)
+    input_images = transform_image(image).unsqueeze(0)
+    debug_log(f"[AI] Tensor shape: {input_images.shape}, initial device: {input_images.device}", "ai_process")
+    debug_log(f"[AI] Moving tensor to device: {device}", "ai_process")
+    input_images = input_images.to(device)
+    debug_log(f"[AI] Tensor now on device: {input_images.device}", "ai_process")
     
     # Use mixed precision if enabled
     if USE_MIXED_PRECISION and device != 'cpu':
+        debug_log(f"[AI] Using mixed precision (FP16) on GPU", "ai_process")
         with torch.cuda.amp.autocast():
             input_images = input_images.half()
     
-    debug_log(f"[AI] Input tensor created - shape: {input_images.shape}, device: {device}", "ai_process")
+    debug_log(f"[AI] Input tensor ready - shape: {input_images.shape}, device: {input_images.device}, dtype: {input_images.dtype}", "ai_process")
     
     # FIXED MODEL SELECTION: Use BiRefNet for quality, BiRefNet_lite for fast
     if fast_mode:
@@ -633,6 +707,11 @@ def process_image(image, bg, fast_mode=False, transparent=False):
         return image
     
     debug_log(f"[AI] Using model: {model_name}", "ai_process")
+    
+    # Check model device
+    for name, param in list(model.named_parameters())[:1]:
+        debug_log(f"[AI] Model parameter '{name}' is on device: {param.device}", "ai_process")
+        break
     
     try:
         with torch.no_grad():
@@ -668,11 +747,11 @@ def process_image(image, bg, fast_mode=False, transparent=False):
         torch.cuda.empty_cache()
     
     # If transparent background requested, return RGBA image
-    debug_log(f"[AI] 🎯 TRANSPARENCY DECISION IN process_image:", "ai_process")
+    debug_log(f"[AI]  TRANSPARENCY DECISION IN process_image:", "ai_process")
     debug_log(f"[AI]   - transparent param: {transparent}", "ai_process")
     debug_log(f"[AI]   - type(transparent): {type(transparent)}", "ai_process")
     if transparent:
-        debug_log("[AI] ✅ TRANSPARENT PATH SELECTED - Creating RGBA with alpha channel", "ai_process")
+        debug_log("[AI]  TRANSPARENT PATH SELECTED - Creating RGBA with alpha channel", "ai_process")
         image_rgba = image.convert("RGBA")
         
         # CRITICAL FIX: Also clear RGB channels where transparent!
@@ -692,7 +771,7 @@ def process_image(image, bg, fast_mode=False, transparent=False):
         # Apply the mask properly
         image_rgba.putalpha(mask)
         
-        debug_log(f"[AI] ✅ Transparent RGBA image created", "ai_process")
+        debug_log(f"[AI]  Transparent RGBA image created", "ai_process")
         debug_log(f"[AI]   - Size: {image_rgba.size}", "ai_process")
         debug_log(f"[AI]   - Mode: {image_rgba.mode}", "ai_process")
         debug_log(f"[AI]   - Has alpha: {'A' in image_rgba.mode}", "ai_process")
@@ -745,7 +824,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
     debug_log(f"\n[{session_id}] === ASYNC PROCESSING STARTED ===", session_id)
     debug_log(f"[{session_id}] Thread ID: {threading.current_thread().ident}", session_id)
     debug_log(f"[{session_id}] Video path exists: {os.path.exists(video_path)}", session_id)
-    debug_log(f"[{session_id}] 🎯 CRITICAL PARAMETERS:", session_id)
+    debug_log(f"[{session_id}]  CRITICAL PARAMETERS:", session_id)
     debug_log(f"[{session_id}]   - bg_type = '{bg_type}' (type: {type(bg_type).__name__})", session_id)
     debug_log(f"[{session_id}]   - output_format = '{output_format}' (type: {type(output_format).__name__})", session_id)
     debug_log(f"[{session_id}]   - fast_mode = {fast_mode}", session_id)
@@ -1006,7 +1085,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                                 frame_image = frame_image.convert('RGB')
                             frame_image.save(frame_filename, 'PNG')
                         
-                        debug_log(f"[{session_id}] ✅ Saved frame {i+1} to {frame_filename} - File exists: {os.path.exists(frame_filename)}", session_id)
+                        debug_log(f"[{session_id}]  Saved frame {i+1} to {frame_filename} - File exists: {os.path.exists(frame_filename)}", session_id)
                     except Exception as save_err:
                         debug_log(f"[{session_id}] ❌ ERROR saving frame {i+1}: {str(save_err)}", session_id)
                     
@@ -1186,18 +1265,18 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         debug_log(f"[{session_id}] Attempting WebM transparency with image2 format", session_id)
                         
                         # Determine output format based on what user selected
-                        debug_log(f"[{session_id}] 🎬 FORMAT SELECTION FOR TRANSPARENCY:", session_id)
+                        debug_log(f"[{session_id}]  FORMAT SELECTION FOR TRANSPARENCY:", session_id)
                         debug_log(f"[{session_id}]   - output_format = '{output_format}'", session_id)
                         debug_log(f"[{session_id}]   - output_format.lower() = '{output_format.lower()}'", session_id)
                         debug_log(f"[{session_id}]   - Is output_format.lower() == 'webm'? {output_format.lower() == 'webm'}", session_id)
                         if output_format.lower() == 'webm':
                             output_path = f"temp_output_{session_id}.webm"
                             use_webm = True
-                            debug_log(f"[{session_id}]   ✅ SELECTED: WebM with transparency (use_webm=True)", session_id)
+                            debug_log(f"[{session_id}]    SELECTED: WebM with transparency (use_webm=True)", session_id)
                         else:
                             output_path = f"temp_output_{session_id}_transparent.mov"
                             use_webm = False
-                            debug_log(f"[{session_id}]   ✅ SELECTED: MOV with transparency (use_webm=False)", session_id)
+                            debug_log(f"[{session_id}]    SELECTED: MOV with transparency (use_webm=False)", session_id)
                         debug_log(f"[{session_id}]   - output_path = '{output_path}'", session_id)
                         
                         abs_output_path = os.path.join(os.getcwd(), output_path)
@@ -1220,7 +1299,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         debug_log(f"[{session_id}]   - use_webm = {use_webm}", session_id)
                         # Use standard encoding
                         if use_webm:
-                            debug_log(f"[{session_id}]   ✅ USING WEBM WITH VP9 TRANSPARENCY", session_id)
+                            debug_log(f"[{session_id}]    USING WEBM WITH VP9 TRANSPARENCY", session_id)
                             ffmpeg_cmd.extend([
                                 '-c:v', 'libvpx-vp9',
                                 '-pix_fmt', 'yuva420p',
@@ -1229,7 +1308,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                                 '-row-mt', '1'
                             ])
                         else:
-                            debug_log(f"[{session_id}]   ✅ USING MOV PATH WITH TRANSPARENCY", session_id)
+                            debug_log(f"[{session_id}]    USING MOV PATH WITH TRANSPARENCY", session_id)
                             ffmpeg_cmd.extend([
                                 '-c:v', 'png',
                                 '-pred', 'mixed'
@@ -1253,7 +1332,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         #     # Map both video and audio streams
                         #     ffmpeg_cmd.extend(['-map', '0:v', '-map', '1:a'])
                         #     debug_log(f"[{session_id}] Audio will be included in output", session_id)
-                        debug_log(f"[{session_id}] ⚠️ AUDIO DISABLED FOR TRANSPARENCY DEBUGGING!", session_id)
+                        debug_log(f"[{session_id}] Warning: AUDIO DISABLED FOR TRANSPARENCY DEBUGGING!", session_id)
                         
                         # Output file (must be last)
                         ffmpeg_cmd.append(abs_output_path)
@@ -1274,7 +1353,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         import shutil
                         # shutil.rmtree(temp_dir)  # COMMENTED OUT TO INSPECT FRAMES!
                         debug_log(f"[{session_id}] 🔍 TEMP FRAMES KEPT FOR INSPECTION: {temp_dir}", session_id)
-                        debug_log(f"[{session_id}] ⚠️ Remember to manually delete temp folders later!", session_id)
+                        debug_log(f"[{session_id}] Warning: Remember to manually delete temp folders later!", session_id)
                         
                         # Create a dummy video object for compatibility
                         processed_video = None  # We'll skip MoviePy export
@@ -1321,7 +1400,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
             debug_log(f"[{session_id}]   - Looking for: {abs_output_path}", session_id)
             debug_log(f"[{session_id}]   - File exists? {os.path.exists(abs_output_path)}", session_id)
             if bg_type == "Transparent" and os.path.exists(abs_output_path):
-                debug_log(f"[{session_id}] ✅ Direct FFmpeg transparent video already exists - skipping fallback", session_id)
+                debug_log(f"[{session_id}]  Direct FFmpeg transparent video already exists - skipping fallback", session_id)
                 processed_video = None  # Keep it None to skip MoviePy export
             # Try without audio as fallback
             elif processed_frames:
@@ -1365,21 +1444,21 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         skip_moviepy = processed_video is None and bg_type == "Transparent" and os.path.exists(abs_output_path)
         debug_log(f"[{session_id}]   - WILL SKIP MOVIEPY? {skip_moviepy}", session_id)
         if skip_moviepy:
-            debug_log(f"[{session_id}] ✅ SKIPPING MoviePy export - Video already created with direct FFmpeg", session_id)
+            debug_log(f"[{session_id}]  SKIPPING MoviePy export - Video already created with direct FFmpeg", session_id)
         else:
-            debug_log(f"[{session_id}] ⚠️ ENTERING MOVIEPY EXPORT (THIS MAY OVERWRITE TRANSPARENCY!)", session_id)
+            debug_log(f"[{session_id}] Warning: ENTERING MOVIEPY EXPORT (THIS MAY OVERWRITE TRANSPARENCY!)", session_id)
             # Determine output format and codec with error handling
             output_ext = output_format.lower()
             debug_log(f"[{session_id}] STARTING VIDEO EXPORT - Format: {output_ext}, Background type: {bg_type}", session_id)
             
             try:
-                debug_log(f"[{session_id}] 🎬 FINAL EXPORT LOGIC:", session_id)
+                debug_log(f"[{session_id}]  FINAL EXPORT LOGIC:", session_id)
                 debug_log(f"[{session_id}]   - output_ext = '{output_ext}'", session_id)
                 debug_log(f"[{session_id}]   - bg_type = '{bg_type}'", session_id)
                 if output_ext == 'webm':
                     debug_log(f"[{session_id}]   🔍 WebM export branch", session_id)
                     if bg_type == "Transparent":
-                        debug_log(f"[{session_id}]   ⚠️ TRANSPARENT WEBM - SHOULD BE ALREADY CREATED!", session_id)
+                        debug_log(f"[{session_id}]   Warning: TRANSPARENT WEBM - SHOULD BE ALREADY CREATED!", session_id)
                         # WebM transparency is broken, already handled above with MOV
                         debug_log(f"[{session_id}] Transparent WebM already created", session_id)
                         # Skip writing another file, we already have the MOV
@@ -1418,9 +1497,9 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         try:
                             processed_video.write_videofile(abs_webm_preview_path, codec="libvpx-vp9", threads=2, 
                                 ffmpeg_params=["-pix_fmt", "yuva420p", "-b:v", "0", "-crf", "10", "-row-mt", "1"], logger=None)
-                            debug_log(f"[{session_id}] ✅ WebM preview created successfully for transparent MOV", session_id)
-                            debug_log(f"[{session_id}] ✅ WebM preview file exists: {os.path.exists(abs_webm_preview_path)}", session_id)
-                            debug_log(f"[{session_id}] ✅ WebM preview file size: {os.path.getsize(abs_webm_preview_path) if os.path.exists(abs_webm_preview_path) else 0} bytes", session_id)
+                            debug_log(f"[{session_id}]  WebM preview created successfully for transparent MOV", session_id)
+                            debug_log(f"[{session_id}]  WebM preview file exists: {os.path.exists(abs_webm_preview_path)}", session_id)
+                            debug_log(f"[{session_id}]  WebM preview file size: {os.path.getsize(abs_webm_preview_path) if os.path.exists(abs_webm_preview_path) else 0} bytes", session_id)
                         except Exception as e:
                             debug_log(f"[{session_id}] ❌ Warning: Failed to create WebM preview: {str(e)}", session_id)
                     else:
@@ -1447,9 +1526,9 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         try:
                             processed_video.write_videofile(abs_webm_preview_path, codec="libvpx-vp9", threads=2, 
                                 ffmpeg_params=["-b:v", "0", "-crf", "10", "-row-mt", "1"], logger=None)
-                            debug_log(f"[{session_id}] ✅ WebM preview created successfully for MOV", session_id)
-                            debug_log(f"[{session_id}] ✅ WebM preview file exists: {os.path.exists(abs_webm_preview_path)}", session_id)
-                            debug_log(f"[{session_id}] ✅ WebM preview file size: {os.path.getsize(abs_webm_preview_path) if os.path.exists(abs_webm_preview_path) else 0} bytes", session_id)
+                            debug_log(f"[{session_id}]  WebM preview created successfully for MOV", session_id)
+                            debug_log(f"[{session_id}]  WebM preview file exists: {os.path.exists(abs_webm_preview_path)}", session_id)
+                            debug_log(f"[{session_id}]  WebM preview file size: {os.path.getsize(abs_webm_preview_path) if os.path.exists(abs_webm_preview_path) else 0} bytes", session_id)
                         except Exception as e:
                             debug_log(f"[{session_id}] ❌ Warning: Failed to create WebM preview: {str(e)}", session_id)
                 else:  # Default to MP4
@@ -1748,7 +1827,7 @@ def process_video():
         # Get form data
         video_file = request.files.get('video')
         bg_type = request.form.get('bg_type', 'Color')
-        debug_log(f"\n🎯 BACKGROUND TYPE FROM FORM:", session_id)
+        debug_log(f"\n BACKGROUND TYPE FROM FORM:", session_id)
         debug_log(f"  - Raw value: '{bg_type}'", session_id)
         debug_log(f"  - Type: {type(bg_type).__name__}", session_id)
         debug_log(f"  - Is 'Transparent'? {bg_type == 'Transparent'}", session_id)
@@ -1759,7 +1838,7 @@ def process_video():
         video_handling = request.form.get('video_handling', 'slow_down')
         fast_mode = request.form.get('fast_mode', 'true').lower() == 'true'
         output_format = request.form.get('output_format', 'mp4')
-        debug_log(f"\n🎯 OUTPUT FORMAT FROM FORM:", session_id)
+        debug_log(f"\n OUTPUT FORMAT FROM FORM:", session_id)
         debug_log(f"  - Raw value: '{output_format}'", session_id)
         debug_log(f"  - Lowercase: '{output_format.lower()}'", session_id)
         debug_log(f"  - Is 'webm'? {output_format.lower() == 'webm'}", session_id)
@@ -2110,7 +2189,7 @@ def health_check():
         
         return jsonify({
             'status': 'healthy',
-            'device': device,
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu',
             'models_available': models_available,
             'models_loaded': birefnet is not None and birefnet_lite is not None,
             'system_info': {
@@ -2126,11 +2205,33 @@ def health_check():
     except Exception as e:
         return jsonify({
             'status': 'degraded',
-            'device': device,
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu',
             'models_available': models_available,
             'models_loaded': birefnet is not None and birefnet_lite is not None,
             'error': str(e)
         })
+
+@app.route('/api/hw_status', methods=['GET'])
+def hw_status():
+    """Alternative hardware status endpoint"""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        # Check actual CUDA availability in real-time
+        actual_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        return jsonify({
+            'status': 'ok',
+            'hardware': {
+                'processing_device': actual_device.upper(),
+                'gpu_available': torch.cuda.is_available(),
+                'gpu_name': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'Not Available',
+                'memory_gb': round(memory.total / (1024**3), 1),
+                'memory_available_gb': round(memory.available / (1024**3), 1),
+                'memory_usage_percent': memory.percent
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)})
 
 @app.route('/api/test', methods=['GET'])
 def test_endpoint():
@@ -2141,6 +2242,8 @@ def test_endpoint():
         'models_available': models_available,
         'models_loaded': models_loaded
     })
+
+
 
 @app.route('/api/hardware_status', methods=['GET'])
 def hardware_status():
@@ -2190,6 +2293,61 @@ def hardware_status():
             'error': str(e),
             'processing_device': device
         })
+
+@app.route('/api/gpu_diagnostics', methods=['GET'])
+def gpu_diagnostics():
+    """Detailed GPU and PyTorch diagnostics for troubleshooting CUDA availability."""
+    import platform
+    info = {
+        'platform': platform.platform(),
+        'python_executable': sys.executable,
+        'env': {
+            'CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES'),
+            'PYTORCH_CUDA_ALLOC_CONF': os.environ.get('PYTORCH_CUDA_ALLOC_CONF')
+        },
+        'torch': {
+            'imported': False,
+            'version': None,
+            'compiled_with_cuda': None,
+            'cuda_is_available': False,
+            'device_count': 0,
+            'device_name_0': None
+        },
+        'nvidia_smi': {
+            'available': False,
+            'raw': None
+        }
+    }
+    try:
+        import torch  # noqa: F401
+        info['torch']['imported'] = True
+        info['torch']['version'] = getattr(torch, '__version__', None)
+        info['torch']['compiled_with_cuda'] = getattr(getattr(torch, 'version', None), 'cuda', None)
+        try:
+            info['torch']['cuda_is_available'] = bool(torch.cuda.is_available())
+        except Exception:
+            info['torch']['cuda_is_available'] = False
+        try:
+            info['torch']['device_count'] = int(torch.cuda.device_count())
+            if info['torch']['device_count'] > 0:
+                info['torch']['device_name_0'] = torch.cuda.get_device_name(0)
+        except Exception:
+            pass
+    except Exception as e:
+        info['torch']['error'] = str(e)
+
+    # Try nvidia-smi
+    try:
+        import shutil, subprocess
+        nvsmi = shutil.which('nvidia-smi')
+        if nvsmi:
+            result = subprocess.run([nvsmi], capture_output=True, text=True, timeout=10)
+            info['nvidia_smi']['available'] = result.returncode == 0
+            info['nvidia_smi']['raw'] = result.stdout
+    except Exception as e:
+        info['nvidia_smi']['error'] = str(e)
+
+    return jsonify(info)
 
 @app.route('/api/reset_models', methods=['POST'])
 def reset_models():
@@ -2243,9 +2401,11 @@ def handle_connect():
     emit('connected', {'message': 'Connected to video processing server'})
     
     # Send initial system status to debug console
+    # Check actual GPU availability in real-time
+    actual_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     debug_log(f'Server Status: Ready', 'system')
     debug_log(f'Python Backend: Running on port 5000', 'system')
-    debug_log(f'Device: {device}', 'system')
+    debug_log(f'Device: {actual_device}', 'system')
     debug_log(f'Models Available: {models_available}', 'system')
     debug_log(f'Models Loaded: {models_loaded}', 'system')
     debug_log(f'BiRefNet: {"Loaded" if birefnet is not None else "Not loaded"}', 'system')
