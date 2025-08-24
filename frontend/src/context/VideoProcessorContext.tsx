@@ -152,6 +152,8 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     isConnecting.current = true;
     const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
     let connectionAttempts = 0;
+    const startTime = Date.now();
+    const GRACE_PERIOD = 4000; // 4 seconds grace period for backend to start
     
     const initSocket = () => {
       // Create socket with polling-only transport to avoid WebSocket issues
@@ -185,20 +187,26 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
 
       newSocket.on('connect_error', (err) => {
         connectionAttempts++;
-        // Only show error after 3 attempts to avoid showing transient errors
-        if (connectionAttempts > 3) {
+        const elapsedTime = Date.now() - startTime;
+        
+        // Only show error after grace period OR after multiple attempts
+        if (elapsedTime > GRACE_PERIOD && connectionAttempts > 2) {
           console.log('Connection error after', connectionAttempts, 'attempts:', err.message);
           setState(prev => ({ 
             ...prev, 
             connectionError: 'Waiting for Python server to start...' 
           }));
+        } else {
+          console.log(`Connection attempt ${connectionAttempts} (${elapsedTime}ms elapsed) - backend starting...`);
         }
       });
 
       newSocket.on('disconnect', (reason) => {
         console.log('Disconnected from server:', reason);
-        // Only show error if it's not a normal disconnect
-        if (reason !== 'io client disconnect' && reason !== 'io server disconnect') {
+        const elapsedTime = Date.now() - startTime;
+        
+        // Only show error if it's not a normal disconnect AND we're past the grace period
+        if (reason !== 'io client disconnect' && reason !== 'io server disconnect' && elapsedTime > GRACE_PERIOD) {
           setState(prev => ({ 
             ...prev, 
             connectionError: 'Connection lost. Attempting to reconnect...' 
