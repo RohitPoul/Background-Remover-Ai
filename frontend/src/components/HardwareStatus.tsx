@@ -8,9 +8,7 @@ import {
   Warning as WarningIcon 
 } from '@mui/icons-material';
 
-const API_BASE = process.env.NODE_ENV === 'production' 
-  ? 'http://localhost:5000'  
-  : 'http://localhost:5000';
+const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
 
 interface HardwareInfo {
   processing_device: string;
@@ -38,48 +36,73 @@ export default function HardwareStatus() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
-    // Try fetching immediately, then every 5 seconds if failed, up to 3 times
-    const tryFetch = () => {
+    // Give backend 3 seconds to start before showing any error
+    const initTimer = setTimeout(() => {
+      setIsInitializing(false);
+    }, 3000);
+
+    // Start fetching after a brief delay to allow backend to initialize
+    const fetchTimer = setTimeout(() => {
       fetchHardwareStatus();
-      if (retryCount < 3 && error) {
-        setTimeout(() => {
-          setRetryCount(prev => prev + 1);
-          tryFetch();
-        }, 5000);
-      }
-    };
+    }, 500);
     
-    tryFetch();
+    // Retry logic
+    const retryInterval = setInterval(() => {
+      if (error && retryCount < 10) {
+        setRetryCount(prev => prev + 1);
+        fetchHardwareStatus();
+      }
+    }, 2000);
     
     // Refresh every 30 seconds once connected
-    const interval = setInterval(() => {
+    const refreshInterval = setInterval(() => {
       if (!error) fetchHardwareStatus();
     }, 30000);
     
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearTimeout(initTimer);
+      clearTimeout(fetchTimer);
+      clearInterval(retryInterval);
+      clearInterval(refreshInterval);
+    };
+  }, [error, retryCount]);
 
   const fetchHardwareStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/hardware_status`);
+      const response = await fetch(`${API_BASE}/api/hardware_status`, {
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      });
       if (response.ok) {
         const data = await response.json();
-        setHardware(data.hardware);
-        setSettings(data.settings);
+        // Extract hardware and settings from the response
+        if (data.hardware) {
+          setHardware(data.hardware);
+        }
+        if (data.settings) {
+          setSettings(data.settings);
+        }
         setError(null);
+        setRetryCount(0); // Reset retry count on success
       } else {
-        setError('Failed to fetch hardware status');
+        // Only set error if not initializing
+        if (!isInitializing) {
+          setError('Failed to fetch hardware status');
+        }
       }
     } catch (err) {
-      setError('Cannot connect to backend');
+      // Only set error if not initializing and haven't retried too many times
+      if (!isInitializing && retryCount > 2) {
+        setError('Cannot connect to backend');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
+  if (loading || isInitializing) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
         <CircularProgress size={16} />
@@ -115,7 +138,7 @@ export default function HardwareStatus() {
   const isGPU = hardware.processing_device === 'CUDA' || hardware.processing_device === 'MPS';
   const deviceColor = isGPU ? 'success' : 'warning';
   const deviceIcon = isGPU ? <GpuIcon /> : <CpuIcon />;
-  const speedLevel = settings?.optimization_profile || 'unknown';
+  const speedLevel = settings?.optimization_profile || (isGPU ? 'high' : 'medium'); // Use actual profile or estimate
   
   // Determine performance level
   const getPerformanceColor = () => {
