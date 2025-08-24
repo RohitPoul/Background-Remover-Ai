@@ -67,12 +67,20 @@ class HardwareOptimizer:
             'compute_capability': None
         }
         
-        # Check for NVIDIA GPU
-        if torch.cuda.is_available():
-            try:
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    gpu = gpus[0]
+        print(f"DEBUG: Checking for GPU...")
+        print(f"DEBUG: PyTorch version: {torch.__version__}")
+        print(f"DEBUG: CUDA available: {torch.cuda.is_available()}")
+        
+        # Try to detect NVIDIA GPU using GPUtil first
+        try:
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                print(f"DEBUG: Found {len(gpus)} GPU(s) via GPUtil")
+                gpu = gpus[0]
+                print(f"DEBUG: GPU Name: {gpu.name}, Memory: {gpu.memoryTotal}MB")
+                
+                # Now check if PyTorch can use it
+                if torch.cuda.is_available():
                     gpu_info.update({
                         'available': True,
                         'type': 'nvidia',
@@ -80,16 +88,28 @@ class HardwareOptimizer:
                         'memory': gpu.memoryTotal / 1024,  # Convert MB to GB
                         'compute_capability': torch.cuda.get_device_capability(0)
                     })
-            except:
+                else:
+                    print(f"DEBUG: GPUtil found GPU but PyTorch CUDA not available!")
+                    print(f"DEBUG: This might be a PATH or driver issue")
+        except Exception as e:
+            print(f"DEBUG: GPUtil error: {e}")
+        
+        # If GPUtil didn't work but CUDA is available, try direct PyTorch detection
+        if not gpu_info['available'] and torch.cuda.is_available():
+            try:
+                print(f"DEBUG: Using PyTorch direct GPU detection")
                 gpu_info.update({
                     'available': True,
                     'type': 'nvidia',
                     'name': torch.cuda.get_device_name(0),
-                    'memory': torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    'memory': torch.cuda.get_device_properties(0).total_memory / (1024**3),
+                    'compute_capability': torch.cuda.get_device_capability(0)
                 })
+            except Exception as e:
+                print(f"DEBUG: PyTorch GPU detection error: {e}")
         
         # Check for Apple Silicon
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        if not gpu_info['available'] and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             gpu_info.update({
                 'available': True,
                 'type': 'apple',
@@ -98,7 +118,7 @@ class HardwareOptimizer:
             })
         
         # Check for AMD GPU (ROCm)
-        elif hasattr(torch, 'hip') and torch.hip.is_available():
+        if not gpu_info['available'] and hasattr(torch, 'hip') and torch.hip.is_available():
             gpu_info.update({
                 'available': True,
                 'type': 'amd',
