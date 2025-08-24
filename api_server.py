@@ -1,3 +1,8 @@
+import os
+# Speed up startup by disabling TensorFlow optimizations
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN to speed up startup
+
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -6,7 +11,6 @@ import torch
 from torchvision import transforms
 from PIL import Image
 import numpy as np
-import os
 import glob
 import tempfile
 import uuid
@@ -69,24 +73,17 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
 DEBUG_MODE = True  # Enable full debugging to identify GPU issues [[memory:6712208]]
 
 # Import hardware optimizer
-try:
-    from hardware_optimizer import get_hardware_optimizer
-    hardware_optimizer = get_hardware_optimizer()
-    hw_settings = hardware_optimizer.get_optimized_settings()
-    hardware_optimizer.print_optimization_report()
-except Exception as e:
-    print(f"Warning: Could not load hardware optimizer: {e}")
-    print("Using default settings...")
-    hw_settings = {
-        'device': 'cpu',
-        'torch_threads': 2,
-        'max_workers': 2,
-        'batch_size': 1,
-        'frame_buffer_size': 30,
-        'use_mixed_precision': False,
-        'use_model_quantization': False,
-        'model_preference': 'fast'
-    }
+# Use quick defaults for fast startup
+hw_settings = {
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'torch_threads': 4,
+    'max_workers': 4,
+    'batch_size': 4 if torch.cuda.is_available() else 1,
+    'frame_buffer_size': 100,
+    'use_mixed_precision': torch.cuda.is_available(),
+    'use_model_quantization': False,
+    'model_preference': 'fast'
+}
 
 # Configure PyTorch based on hardware
 torch.set_float32_matmul_precision("high" if hw_settings['device'] != 'cpu' else "medium")
@@ -100,71 +97,74 @@ if hw_settings['device'] == 'cpu':
     except:
         pass
 
-# Set device based on hardware detection
-print("\n" + "="*60)
-print("GPU DETECTION DEBUG LOG")
-print("="*60)
-
-# Step 1: Check PyTorch version and CUDA compilation
-print(f"1. PyTorch version: {torch.__version__}")
-print(f"2. PyTorch compiled with CUDA: {torch.version.cuda if hasattr(torch.version, 'cuda') else 'No CUDA support'}")
-
-# Step 2: Check if CUDA is available
+# Quick device detection for faster startup
 cuda_available = torch.cuda.is_available()
-print(f"3. torch.cuda.is_available(): {cuda_available}")
+device = 'cuda' if cuda_available else 'cpu'
 
-if cuda_available:
-    # Step 3: Get GPU details
-    print(f"4. Number of GPUs: {torch.cuda.device_count()}")
-    print(f"5. Current GPU index: {torch.cuda.current_device()}")
-    print(f"6. GPU Name: {torch.cuda.get_device_name(0)}")
-    print(f"7. GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+# Defer detailed GPU detection until after server starts
+def print_gpu_detection():
+    print("\n" + "="*60)
+    print("GPU DETECTION DEBUG LOG")
+    print("="*60)
     
-    # Step 4: Test GPU tensor creation
-    try:
-        test_tensor = torch.zeros(1, 1).cuda()
-        print(f"8. Test tensor on GPU: Success - {test_tensor.device}")
-        del test_tensor
-    except Exception as e:
-        print(f"8. Test tensor on GPU: Failed - {e}")
-        cuda_available = False
+    # Step 1: Check PyTorch version and CUDA compilation
+    print(f"1. PyTorch version: {torch.__version__}")
+    print(f"2. PyTorch compiled with CUDA: {torch.version.cuda if hasattr(torch.version, 'cuda') else 'No CUDA support'}")
     
+    # Step 2: Check if CUDA is available
+    print(f"3. torch.cuda.is_available(): {torch.cuda.is_available()}")
+
     if cuda_available:
-        device = 'cuda'
-        print(f"\nGPU DETECTED AND WORKING! Using: {torch.cuda.get_device_name(0)}")
+        # Step 3: Get GPU details
+        print(f"4. Number of GPUs: {torch.cuda.device_count()}")
+        print(f"5. Current GPU index: {torch.cuda.current_device()}")
+        print(f"6. GPU Name: {torch.cuda.get_device_name(0)}")
+        print(f"7. GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
         
-        # Update hw_settings to reflect actual GPU availability
-        hw_settings['device'] = 'cuda'
-        
-        # Force reload hardware settings to get GPU-optimized parameters
+        # Step 4: Test GPU tensor creation
         try:
-            hardware_optimizer = get_hardware_optimizer()
-            gpu_settings = hardware_optimizer.get_optimized_settings()
-            if gpu_settings['device'] == 'cuda':
-                hw_settings.update(gpu_settings)
-                print(f"9. Loaded GPU-optimized settings:")
-                print(f"   - Batch size: {hw_settings['batch_size']}")
-                print(f"   - Workers: {hw_settings['max_workers']}")
-                print(f"   - Mixed precision: {hw_settings.get('use_mixed_precision', False)}")
+            test_tensor = torch.zeros(1, 1).cuda()
+            print(f"8. Test tensor on GPU: Success - {test_tensor.device}")
+            del test_tensor
         except Exception as e:
-            print(f"9. Failed to load GPU settings: {e}")
+            print(f"8. Test tensor on GPU: Failed - {e}")
+            cuda_available = False
+        
+        if cuda_available:
+            print(f"\nGPU DETECTED AND WORKING! Using: {torch.cuda.get_device_name(0)}")
+            
+            # Update hw_settings to reflect actual GPU availability
+            hw_settings['device'] = 'cuda'
+            
+            # Force reload hardware settings to get GPU-optimized parameters
+            try:
+                hardware_optimizer = get_hardware_optimizer()
+                gpu_settings = hardware_optimizer.get_optimized_settings()
+                if gpu_settings['device'] == 'cuda':
+                    hw_settings.update(gpu_settings)
+                    print(f"9. Loaded GPU-optimized settings:")
+                    print(f"   - Batch size: {hw_settings['batch_size']}")
+                    print(f"   - Workers: {hw_settings['max_workers']}")
+                    print(f"   - Mixed precision: {hw_settings.get('use_mixed_precision', False)}")
+            except Exception as e:
+                print(f"9. Failed to load GPU settings: {e}")
+        else:
+            print("\nWarning: GPU detected but not functional, falling back to CPU")
+            hw_settings['device'] = 'cpu'
     else:
-        device = 'cpu'
-        print("\nWarning: GPU detected but not functional, falling back to CPU")
+        print("\nWarning: CUDA not available, using CPU")
+        print("Possible reasons:")
+        print("  - No NVIDIA GPU present")
+        print("  - NVIDIA drivers not installed")
+        print("  - PyTorch installed without CUDA support")
+        print("  - CUDA version mismatch")
         hw_settings['device'] = 'cpu'
-else:
-    device = 'cpu'
-    print("\nWarning: CUDA not available, using CPU")
-    print("Possible reasons:")
-    print("  - No NVIDIA GPU present")
-    print("  - NVIDIA drivers not installed")
-    print("  - PyTorch installed without CUDA support")
-    print("  - CUDA version mismatch")
-    hw_settings['device'] = 'cpu'
+    
+    print("="*60)
+    print(f"FINAL DEVICE: {device}")
+    print("="*60 + "\n")
 
-print("="*60)
-print(f"FINAL DEVICE: {device}")
-print("="*60 + "\n")
+# GPU detection will run after server starts
 
 # Global settings from hardware optimizer
 MAX_BATCH_SIZE = hw_settings['batch_size'] if device != 'cpu' else 1
@@ -325,8 +325,8 @@ def preload_models():
                 )
                 birefnet_lite.to(device).eval()
                 
-                # Apply quantization if needed
-                birefnet_lite = quantize_model(birefnet_lite)
+                # DISABLED: Quantization causing model to output zeros
+                # birefnet_lite = quantize_model(birefnet_lite)
                 print("Lite model ready!")
         else:
             # Load both models for high-end systems
@@ -356,7 +356,8 @@ def preload_models():
                 else:
                     print(f"Model loaded to: {device}")
                     
-                birefnet_lite = quantize_model(birefnet_lite)
+                # DISABLED: Quantization causing issues
+                # birefnet_lite = quantize_model(birefnet_lite)
                 
             if birefnet is None and hw_settings.get('profile') in ['ultra', 'high']:
                 print("Loading BiRefNet full model for quality mode...")
@@ -367,7 +368,8 @@ def preload_models():
                         cache_dir=MODEL_CACHE_DIR
                     )
                     birefnet.to(device).eval()
-                    birefnet = quantize_model(birefnet)
+                    # DISABLED: Quantization causing issues
+                    # birefnet = quantize_model(birefnet)
                     print("Full model ready!")
                 except Exception as e:
                     print(f"Could not load full model: {e}")
@@ -635,11 +637,11 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     input_images = input_images.to(device)
     debug_log(f"[AI] Tensor now on device: {input_images.device}", "ai_process")
     
-    # Use mixed precision if enabled
-    if USE_MIXED_PRECISION and device != 'cpu':
-        debug_log(f"[AI] Using mixed precision (FP16) on GPU", "ai_process")
-        with torch.cuda.amp.autocast():
-            input_images = input_images.half()
+    # DISABLED: Mixed precision was causing issues
+    # if USE_MIXED_PRECISION and device != 'cpu':
+    #     debug_log(f"[AI] Using mixed precision (FP16) on GPU", "ai_process")
+    #     with torch.cuda.amp.autocast():
+    #         input_images = input_images.half()
     
     debug_log(f"[AI] Input tensor ready - shape: {input_images.shape}, device: {input_images.device}, dtype: {input_images.dtype}", "ai_process")
     
@@ -655,9 +657,11 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     
     if model is None:
         debug_log("[AI] ERROR: No AI model available, returning original image", "ai_process")
+        print(f"CRITICAL ERROR: No AI model loaded! birefnet={birefnet is not None}, birefnet_lite={birefnet_lite is not None}")
         return image
     
     debug_log(f"[AI] Using model: {model_name}", "ai_process")
+    print(f"INFO: Processing with {model_name}")
     
     # Check model device
     for name, param in list(model.named_parameters())[:1]:
@@ -667,18 +671,26 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     try:
         with torch.no_grad():
             debug_log("[AI] Running AI inference to detect foreground...", "ai_process")
+            print(f"Starting AI inference on device: {device}")
             start_inference = time.time()
             
-            # Use mixed precision if available
-            if USE_MIXED_PRECISION and device != 'cpu':
-                with torch.cuda.amp.autocast():
-                    preds = model(input_images)[-1].sigmoid()
+            # DISABLED MIXED PRECISION - causing model to output all zeros
+            # Always use float32 for stability
+            output = model(input_images)
+            print(f"Model output type: {type(output)}")
+            if isinstance(output, (list, tuple)):
+                print(f"Output is list/tuple with {len(output)} elements")
+                preds = output[-1]
             else:
-                preds = model(input_images)[-1].sigmoid()
+                preds = output
+            print(f"Predictions shape before sigmoid: {preds.shape}, min: {preds.min().item():.4f}, max: {preds.max().item():.4f}")
+            preds = preds.sigmoid()
+            print(f"Predictions shape after sigmoid: {preds.shape}, min: {preds.min().item():.4f}, max: {preds.max().item():.4f}")
             
             preds = preds.cpu()
             inference_time = time.time() - start_inference
             debug_log(f"[AI] AI inference complete in {inference_time:.2f}s - predictions shape: {preds.shape}", "ai_process")
+            print(f"AI inference complete in {inference_time:.2f}s")
     except Exception as e:
         debug_log(f"[AI] ERROR in model inference: {e}", "ai_process")
         import traceback
@@ -687,8 +699,23 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     
     debug_log("[AI] Creating mask from AI predictions...", "ai_process")
     pred = preds[0].squeeze()
+    
+    # Debug: Check prediction values
+    import numpy as np
+    pred_np = pred.cpu().numpy()
+    print(f"DEBUG: Prediction stats - min: {pred_np.min():.4f}, max: {pred_np.max():.4f}, mean: {pred_np.mean():.4f}")
+    print(f"DEBUG: Prediction shape: {pred_np.shape}")
+    
+    # Convert to PIL Image - this should scale [0,1] to [0,255]
     pred_pil = transforms.ToPILImage()(pred)
     mask = pred_pil.resize(image_size)
+    
+    # Debug mask values
+    mask_np = np.array(mask)
+    unique_values = np.unique(mask_np)
+    print(f"DEBUG: Mask unique values (first 10): {unique_values[:10]}")
+    print(f"DEBUG: Total unique mask values: {len(unique_values)}")
+    
     debug_log(f"[AI] Mask created - size: {mask.size}, mode: {mask.mode}", "ai_process")
     
     # Immediately free memory
@@ -697,41 +724,31 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     
-    # If transparent background requested, return RGBA image
-    debug_log(f"[AI]  TRANSPARENCY DECISION IN process_image:", "ai_process")
-    debug_log(f"[AI]   - transparent param: {transparent}", "ai_process")
-    debug_log(f"[AI]   - type(transparent): {type(transparent)}", "ai_process")
+    # If transparent background requested, return RGBA image with transparency
     if transparent:
-        debug_log("[AI]  TRANSPARENT PATH SELECTED - Creating RGBA with alpha channel", "ai_process")
+        debug_log("[AI] Creating transparent RGBA image", "ai_process")
+        
+        # Create a transparent background
+        background = Image.new("RGBA", image_size, (0, 0, 0, 0))
+        
+        # Convert image to RGBA
         image_rgba = image.convert("RGBA")
         
-        # CRITICAL FIX: Also clear RGB channels where transparent!
-        # Convert mask to numpy for processing
+        # Use Image.composite to apply the mask (like in the original Gradio code)
+        result = Image.composite(image_rgba, background, mask)
+        
+        # Debug the result
         import numpy as np
-        mask_np = np.array(mask)
-        image_np = np.array(image_rgba)
+        result_np = np.array(result)
+        alpha_channel = result_np[:, :, 3]
+        unique_alpha = np.unique(alpha_channel)
+        print(f"TRANSPARENCY DEBUG: Alpha channel has {len(unique_alpha)} unique values")
+        if len(unique_alpha) <= 5:
+            print(f"  Alpha values: {unique_alpha}")
+        else:
+            print(f"  Alpha range: {unique_alpha.min()} to {unique_alpha.max()}")
         
-        # Where mask is 0 (transparent), set RGB to black (or could be white)
-        # This ensures that if alpha is lost, we see black, not original background
-        transparent_pixels = mask_np < 128  # Threshold for transparency
-        image_np[transparent_pixels] = [0, 0, 0, 0]  # Black with full transparency
-        
-        # Convert back to PIL Image
-        image_rgba = Image.fromarray(image_np, 'RGBA')
-        
-        # Apply the mask properly
-        image_rgba.putalpha(mask)
-        
-        debug_log(f"[AI]  Transparent RGBA image created", "ai_process")
-        debug_log(f"[AI]   - Size: {image_rgba.size}", "ai_process")
-        debug_log(f"[AI]   - Mode: {image_rgba.mode}", "ai_process")
-        debug_log(f"[AI]   - Has alpha: {'A' in image_rgba.mode}", "ai_process")
-        # Check alpha channel values
-        alpha_array = np.array(image_rgba)[:, :, 3]
-        unique_alpha = np.unique(alpha_array)
-        debug_log(f"[AI]   - Unique alpha values (first 10): {unique_alpha[:10] if len(unique_alpha) > 10 else unique_alpha}", "ai_process")
-        debug_log(f"[AI]   - Total unique alpha values: {len(unique_alpha)}", "ai_process")
-        return image_rgba
+        return result
     
     # For non-transparent, ensure RGB format for video consistency
     debug_log("[AI] ❌ NON-TRANSPARENT PATH - Applying background to image...", "ai_process")
@@ -1913,6 +1930,14 @@ def debug_log(message, session_id=None):
     if session_id in ['frame_process', 'frame_serve', 'download']:
         return
     
+    # Allow AI process logs for debugging
+    if session_id == 'ai_process':
+        # Only print critical AI logs
+        if 'ERROR' in message or 'WARNING' in message or 'Using model:' in message:
+            pass  # Allow these
+        else:
+            return  # Skip verbose AI logs
+    
     # Skip most debug messages if not in debug mode (except critical ones)
     if not DEBUG_MODE and session_id != 'system':
         return
@@ -2406,19 +2431,19 @@ signal.signal(signal.SIGINT, shutdown_handler)
 signal.signal(signal.SIGTERM, shutdown_handler)
 
 if __name__ == '__main__':
-    debug_log(f"Found ffmpeg at {ffmpeg_path}", "system")
-    debug_log(f"Using device: {device}", "system")
-    debug_log("Initializing API server...", "system")
-    debug_log("Model cache directory ready", "system")
+    # Quick startup - defer heavy initialization
+    print(f"Starting server on http://localhost:5000 (device: {device})")
     
-    # Clean up any leftover temp files from previous runs
-    cleanup_all_temp_files()
+    # Run initialization tasks in background after server starts
+    def background_init():
+        time.sleep(1)  # Let server start first
+        print_gpu_detection()  # Print GPU details
+        cleanup_all_temp_files()  # Clean temp files
     
-    # Don't preload on startup - load on first use
-    debug_log("Server ready - models will load on first use", "system")
+    threading.Thread(target=background_init, daemon=True).start()
     
     try:
-        # Start the socket server
+        # Start the socket server immediately
         socketio.run(app, debug=False, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
     except KeyboardInterrupt:
         print("\nReceived interrupt signal")
