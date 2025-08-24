@@ -1,11 +1,16 @@
 # 🎬 Video Background Remover AI
 
+> ⚠️ **WORK IN PROGRESS** - This project is under active development. Features may be incomplete, unstable, or subject to change. Use at your own risk.
+
+> 🚧 **Current Status**: Alpha - Core functionality works but expect bugs and rough edges
+
 An AI-powered desktop application for removing and replacing video backgrounds using state-of-the-art BiRefNet models. Built with Electron, React, and Python for cross-platform compatibility.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
 ![Node](https://img.shields.io/badge/node-16+-green.svg)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)
+![Status](https://img.shields.io/badge/status-WIP-orange.svg)
 
 ## ✨ Features
 
@@ -69,6 +74,16 @@ That's it! The app will:
 1. Detect your hardware (GPU/CPU)
 2. Start the Python backend
 3. Launch the Electron interface
+
+## 🐛 Known Issues & Limitations
+
+- **Performance**: Processing can be slow on high-resolution videos (4K+)
+- **Memory**: High RAM usage, especially with longer videos
+- **Stability**: Occasional crashes during intensive processing
+- **Transparency**: Alpha channel may not render correctly in all video players
+- **Formats**: Some video codecs may not be fully supported
+- **UI**: Interface may become unresponsive during processing
+- **Models**: AI models require significant download (~400MB each)
 
 ## 🛠️ System Requirements
 

@@ -37,19 +37,53 @@ export default function HardwareStatus() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [backendConnected, setBackendConnected] = useState(false);
 
+  // First, check if backend is available
   useEffect(() => {
-    // Give backend 3 seconds to start before showing any error
+    const checkBackendConnection = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/health`, {
+          signal: AbortSignal.timeout(2000)
+        });
+        if (response.ok) {
+          setBackendConnected(true);
+          setIsInitializing(false);
+        }
+      } catch {
+        // Backend not ready yet
+      }
+    };
+
+    // Check backend connection every second until connected
+    const connectionInterval = setInterval(() => {
+      if (!backendConnected) {
+        checkBackendConnection();
+      }
+    }, 1000);
+
+    // Initial check
+    checkBackendConnection();
+
+    // Give backend 5 seconds to start before showing error
     const initTimer = setTimeout(() => {
       setIsInitializing(false);
-    }, 3000);
+    }, 5000);
 
-    // Start fetching after a brief delay to allow backend to initialize
-    const fetchTimer = setTimeout(() => {
-      fetchHardwareStatus();
-    }, 500);
+    return () => {
+      clearInterval(connectionInterval);
+      clearTimeout(initTimer);
+    };
+  }, [backendConnected]);
+
+  // Only fetch hardware status after backend is connected
+  useEffect(() => {
+    if (!backendConnected) return;
+
+    // Fetch immediately when backend connects
+    fetchHardwareStatus();
     
-    // Retry logic
+    // Retry logic for hardware status
     const retryInterval = setInterval(() => {
       if (error && retryCount < 10) {
         setRetryCount(prev => prev + 1);
@@ -63,12 +97,10 @@ export default function HardwareStatus() {
     }, 30000);
     
     return () => {
-      clearTimeout(initTimer);
-      clearTimeout(fetchTimer);
       clearInterval(retryInterval);
       clearInterval(refreshInterval);
     };
-  }, [error, retryCount]);
+  }, [backendConnected, error, retryCount]);
 
   const fetchHardwareStatus = async () => {
     try {
@@ -106,7 +138,9 @@ export default function HardwareStatus() {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
         <CircularProgress size={16} />
-        <Typography variant="caption">Detecting hardware...</Typography>
+        <Typography variant="caption">
+          {!backendConnected ? 'Connecting to backend...' : 'Detecting hardware...'}
+        </Typography>
       </Box>
     );
   }
@@ -125,10 +159,12 @@ export default function HardwareStatus() {
         <WarningIcon sx={{ fontSize: 18, color: 'warning.main' }} />
         <Box sx={{ flex: 1 }}>
           <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 600 }}>
-            Backend not connected
+            {!backendConnected ? 'Waiting for backend...' : 'Backend not responding'}
           </Typography>
           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', fontSize: '0.7rem', mt: 0.5 }}>
-            Start the backend server: Run `npm start` or `python api_server.py`
+            {!backendConnected 
+              ? 'Starting Python server...' 
+              : 'Backend connected but hardware status unavailable'}
           </Typography>
         </Box>
       </Box>
