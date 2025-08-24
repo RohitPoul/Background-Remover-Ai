@@ -568,92 +568,43 @@ def process_frame_simple(frame, bg_type, bg, fast_mode, bg_frame_index, backgrou
         # Keep original frame dimensions
         original_shape = frame.shape
         frame_id = f"Frame_{bg_frame_index}"
-        debug_log(f"[FRAME {frame_id}] Starting processing - Shape: {original_shape}, Type: {frame.dtype}, bg_type={bg_type}", "frame_process")
         
         # Convert numpy array to PIL Image
-        debug_log(f"[FRAME {frame_id}] Converting numpy array to PIL Image", "frame_process")
         pil_image = Image.fromarray(frame)
-        debug_log(f"[FRAME {frame_id}] PIL Image created - Size: {pil_image.size}, Mode: {pil_image.mode}", "frame_process")
         
         # Process based on background type
         if bg_type == "Transparent":
-            debug_log(f"[FRAME {frame_id}] Processing with TRANSPARENT background", "frame_process")
             processed_image = process_image(pil_image, None, fast_mode, transparent=True)
-            debug_log(f"[FRAME {frame_id}] Transparent processing complete - Mode: {processed_image.mode if isinstance(processed_image, Image.Image) else 'not PIL'}", "frame_process")
         elif bg_type == "Color":
-            debug_log(f"[FRAME {frame_id}] Processing with COLOR background: {color}", "frame_process")
             processed_image = process_image(pil_image, color, fast_mode, transparent=False)
-            debug_log(f"[FRAME {frame_id}] Color background applied", "frame_process")
         elif bg_type == "Image":
-            debug_log(f"[FRAME {frame_id}] Processing with IMAGE background", "frame_process")
             processed_image = process_image(pil_image, bg, fast_mode, transparent=False)
-            debug_log(f"[FRAME {frame_id}] Image background applied", "frame_process")
         elif bg_type == "Video":
-            debug_log(f"[FRAME {frame_id}] Processing with VIDEO background", "frame_process")
             if background_frames and len(background_frames) > 0 and bg_frame_index < len(background_frames):
                 background_frame = background_frames[bg_frame_index]
-                debug_log(f"[FRAME {frame_id}] Using background frame {bg_frame_index} of {len(background_frames)}", "frame_process")
                 background_image = Image.fromarray(background_frame)
                 processed_image = process_image(pil_image, background_image, fast_mode, transparent=False)
             else:
-                debug_log(f"[FRAME {frame_id}] No background frame available, falling back to color", "frame_process")
                 processed_image = process_image(pil_image, color, fast_mode, transparent=False)
         else:
-            debug_log(f"[FRAME {frame_id}] ERROR: Unknown bg_type: {bg_type}, using original", "frame_process")
             processed_image = pil_image
         
         # Convert back to numpy array
-        debug_log(f"[FRAME {frame_id}] Converting processed image back to numpy array", "frame_process")
         if isinstance(processed_image, Image.Image):
             result = np.array(processed_image)
-            debug_log(f"[FRAME {frame_id}] Converted to numpy - Shape: {result.shape}, dtype: {result.dtype}", "frame_process")
         else:
             result = processed_image
             
         # Ensure dimensions match original
         if result.shape[:2] != original_shape[:2]:
-            debug_log(f"[FRAME {frame_id}] Dimension mismatch! Resizing from {result.shape} to {original_shape}", "frame_process")
             pil_result = Image.fromarray(result)
             pil_result = pil_result.resize((original_shape[1], original_shape[0]), Image.LANCZOS)
             result = np.array(pil_result)
-            debug_log(f"[FRAME {frame_id}] Resized to match original dimensions", "frame_process")
         
-        # CRITICAL: Verify processing actually did something
-        debug_log(f"[FRAME {frame_id}] Checking if background removal was successful...", "frame_process")
-        
-        # Fix transparency consistency issues
-        if result.shape[2] == 4:  # RGBA with transparency
-            debug_log(f"[FRAME {frame_id}]  RGBA image with transparency created", "frame_process")
-            # Check if alpha channel has actual transparency data
-            alpha = result[:, :, 3]
-            unique_alpha_values = len(np.unique(alpha))
-            debug_log(f"[FRAME {frame_id}] Alpha channel has {unique_alpha_values} unique values", "frame_process")
-            
-            if unique_alpha_values <= 1:
-                debug_log(f"[FRAME {frame_id}] Warning: WARNING: Alpha channel is uniform (no transparency variation)", "frame_process")
-        elif frame.shape != result.shape:
-            debug_log(f"[FRAME {frame_id}]  Shape changed: {frame.shape} -> {result.shape}", "frame_process")
-        else:
-            # Compare pixels to see if they changed
-            try:
-                # Calculate a quick pixel diff - if background was removed, there should be differences
-                pixel_diff_pct = np.count_nonzero(frame != result) / frame.size * 100
-                debug_log(f"[FRAME {frame_id}] Pixel difference: {pixel_diff_pct:.2f}%", "frame_process")
-                
-                if pixel_diff_pct < 1:
-                    debug_log(f"[FRAME {frame_id}] ❌ WARNING: Frame appears UNCHANGED! Less than 1% different!", "frame_process")
-                    debug_log(f"[FRAME {frame_id}] POSSIBLE BACKGROUND REMOVAL FAILURE", "frame_process")
-                else:
-                    debug_log(f"[FRAME {frame_id}]  Frame successfully modified, {pixel_diff_pct:.2f}% pixels changed", "frame_process")
-            except Exception as comp_err:
-                debug_log(f"[FRAME {frame_id}] Could not compare pixel differences: {comp_err}", "frame_process")
-        
-        debug_log(f"[FRAME {frame_id}] Frame processed successfully - Final shape: {result.shape}", "frame_process")
+        # No verbose frame verification logging
         return result, bg_frame_index
     except Exception as e:
-        debug_log(f"[FRAME {frame_id}] ERROR in process_frame_simple: {e}", "frame_process")
-        import traceback
-        debug_log(f"[FRAME {frame_id}] Stack trace: {traceback.format_exc()}", "frame_process")
+        # Frame processing error - return original
         return frame, bg_frame_index
 
 # REMOVED DUPLICATE - Using process_frame_simple instead
@@ -1958,8 +1909,12 @@ def send_debug_to_frontend(session_id, message):
 # Global debug function that sends all messages to frontend
 def debug_log(message, session_id=None):
     """Send debug message to both console and frontend"""
+    # Skip verbose debug messages
+    if session_id in ['frame_process', 'frame_serve', 'download']:
+        return
+    
     # Skip most debug messages if not in debug mode (except critical ones)
-    if not DEBUG_MODE and session_id not in ['system', 'download', 'frame_serve']:
+    if not DEBUG_MODE and session_id != 'system':
         return
     
     if session_id is None:
