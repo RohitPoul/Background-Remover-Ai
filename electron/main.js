@@ -106,68 +106,110 @@ function startPythonServer() {
     });
     return;
   }
-  
-  // First run hardware optimizer silently
-  const hwProcess = spawn('python', ['hardware_optimizer.py'], {
+  // Ensure logs directory exists
+  const logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir);
+  }
+
+  // 1) Run GPU preflight first to ensure CUDA-capable PyTorch is installed
+  console.log('Running GPU preflight...');
+  const preflightProcess = spawn('python', ['gpu_preflight.py'], {
     cwd: process.cwd(),
-    stdio: 'pipe'
+    stdio: 'pipe',
+    env: { ...process.env }
   });
-  
-  hwProcess.on('close', () => {
-    // After hardware detection, start the main server
-    pythonProcess = spawn('python', ['api_server.py'], {
+
+  const preflightLog = fs.createWriteStream(path.join(logsDir, 'gpu_preflight.log'), { flags: 'a' });
+  preflightProcess.stdout.on('data', (data) => {
+    const output = data.toString();
+    console.log(`Preflight: ${output}`);
+    preflightLog.write(`[${new Date().toISOString()}] ${output}`);
+  });
+  preflightProcess.stderr.on('data', (data) => {
+    const error = data.toString();
+    console.error(`Preflight Error: ${error}`);
+    preflightLog.write(`[${new Date().toISOString()}] ${error}`);
+  });
+
+  preflightProcess.on('close', () => {
+    console.log('GPU preflight finished. Starting hardware optimizer...');
+
+    // 2) Run hardware optimizer with CUDA environment
+    const hwProcess = spawn('python', ['hardware_optimizer.py'], {
       cwd: process.cwd(),
       stdio: 'pipe',
       env: {
         ...process.env,
-        IMAGEIO_FFMPEG_EXE: ffmpegPath
+        CUDA_VISIBLE_DEVICES: '0',  // Ensure GPU is visible
+        PYTORCH_CUDA_ALLOC_CONF: 'max_split_size_mb:512'  // Optimize GPU memory
       }
     });
 
-    // Create log directory if it doesn't exist
-    const logsDir = path.join(process.cwd(), 'logs');
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir);
-    }
-    
-    // Create log file streams
-    const stdoutLog = fs.createWriteStream(path.join(logsDir, 'python_stdout.log'), { flags: 'a' });
-    const stderrLog = fs.createWriteStream(path.join(logsDir, 'python_stderr.log'), { flags: 'a' });
-
-    pythonProcess.stdout.on('data', (data) => {
+    const hwLog = fs.createWriteStream(path.join(logsDir, 'hardware_optimizer.log'), { flags: 'a' });
+    hwProcess.stdout.on('data', (data) => {
       const output = data.toString();
-      console.log(`Python: ${output}`);
-      stdoutLog.write(`[${new Date().toISOString()}] ${output}`);
-      
-      // Check for specific messages
-      if (output.includes('Running on')) {
-        console.log('Python server is ready');
-      }
+      console.log(`HW: ${output}`);
+      hwLog.write(`[${new Date().toISOString()}] ${output}`);
     });
-
-    pythonProcess.stderr.on('data', (data) => {
+    hwProcess.stderr.on('data', (data) => {
       const error = data.toString();
-      console.error(`Python Error: ${error}`);
-      stderrLog.write(`[${new Date().toISOString()}] ${error}`);
-      
-      // Show error dialog for critical errors
-      if (error.includes('RuntimeError') || error.includes('ImportError')) {
-        dialog.showErrorBox(
-          'Python Error',
-          `An error occurred in the Python backend:\n\n${error}\n\nCheck logs/python_stderr.log for details.`
-        );
-      }
+      console.error(`HW Error: ${error}`);
+      hwLog.write(`[${new Date().toISOString()}] ${error}`);
     });
 
-    pythonProcess.on('close', (code) => {
-      console.log(`Python process exited with code ${code}`);
-      if (code !== 0 && code !== null) {
-        dialog.showErrorBox(
-          'Python Server Error',
-          `The Python server exited unexpectedly with code ${code}.\n\nCheck logs/python_stderr.log for details.`
-        );
-        app.quit();
-      }
+    hwProcess.on('close', () => {
+      // 3) After hardware detection, start the main server with same environment
+      pythonProcess = spawn('python', ['api_server.py'], {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          IMAGEIO_FFMPEG_EXE: ffmpegPath,
+          CUDA_VISIBLE_DEVICES: '0',  // Ensure GPU is visible
+          PYTORCH_CUDA_ALLOC_CONF: 'max_split_size_mb:512'  // Optimize GPU memory
+        }
+      });
+
+      // Create log file streams
+      const stdoutLog = fs.createWriteStream(path.join(logsDir, 'python_stdout.log'), { flags: 'a' });
+      const stderrLog = fs.createWriteStream(path.join(logsDir, 'python_stderr.log'), { flags: 'a' });
+
+      pythonProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Python: ${output}`);
+        stdoutLog.write(`[${new Date().toISOString()}] ${output}`);
+        
+        // Check for specific messages
+        if (output.includes('Running on')) {
+          console.log('Python server is ready');
+        }
+      });
+
+      pythonProcess.stderr.on('data', (data) => {
+        const error = data.toString();
+        console.error(`Python Error: ${error}`);
+        stderrLog.write(`[${new Date().toISOString()}] ${error}`);
+        
+        // Show error dialog for critical errors
+        if (error.includes('RuntimeError') || error.includes('ImportError')) {
+          dialog.showErrorBox(
+            'Python Error',
+            `An error occurred in the Python backend:\n\n${error}\n\nCheck logs/python_stderr.log for details.`
+          );
+        }
+      });
+
+      pythonProcess.on('close', (code) => {
+        console.log(`Python process exited with code ${code}`);
+        if (code !== 0 && code !== null) {
+          dialog.showErrorBox(
+            'Python Server Error',
+            `The Python server exited unexpectedly with code ${code}.\n\nCheck logs/python_stderr.log for details.`
+          );
+          app.quit();
+        }
+      });
     });
   });
 }
