@@ -58,13 +58,36 @@ export default function VideoUpload() {
     disabled: isUploading,
   });
 
-  const handleRemoveVideo = () => {
+  const handleRemoveVideo = async () => {
+    // AGGRESSIVE CLEANUP when video is removed
+    const sessionId = (window as any).currentSessionId;
+    
+    // Cancel any active processing first
+    if (cancelProcessing) {
+      await cancelProcessing();
+    }
+    
+    // Then clean up ALL resources for this session
+    if (sessionId) {
+      try {
+        const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+        await fetch(`${API_BASE}/api/cleanup_session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        console.log('✅ AGGRESSIVE cleanup completed for session:', sessionId);
+      } catch (error) {
+        console.error('Error cleaning up session:', error);
+      }
+    }
+    
+    // Clear global session tracking
+    (window as any).currentSessionId = null;
+    
+    // Reset UI state
     setUploadedVideo(null);
     setUploadProgress(0);
-    // Reset the entire processing state when video is removed
-    if (cancelProcessing) {
-      cancelProcessing();
-    }
   };
 
   const formatFileSize = (bytes: number) => {
