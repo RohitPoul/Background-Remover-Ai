@@ -30,6 +30,13 @@ interface VideoProcessorState {
   
   // Connection state
   connectionError: string | null;
+  systemWarning: {
+    type: string;
+    severity: 'warning' | 'error' | 'info';
+    title: string;
+    message: string;
+    timestamp: number;
+  } | null;
   
   // Settings
   backgroundType: 'Color' | 'Image' | 'Video' | 'Transparent';
@@ -90,6 +97,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     outputFile: null,
     statusMessage: null,
     connectionError: null,
+    systemWarning: null,
     backgroundType: 'Color',
     backgroundColor: '#00FF00',
     backgroundImage: null,
@@ -115,6 +123,25 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
   }, [state.sessionId]);
 
 
+  
+  // Cleanup on window unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Clean up session if exists
+      const sessionId = (window as any).currentSessionId;
+      if (sessionId) {
+        // Use sendBeacon for reliable cleanup on page unload
+        const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+        navigator.sendBeacon(
+          `${API_BASE}/api/cleanup_session`,
+          JSON.stringify({ session_id: sessionId })
+        );
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
   
   // Initialize socket connection with retry logic
   useEffect(() => {
@@ -154,7 +181,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
               timestamp: Date.now() / 1000,
               sessionId: 'frontend'
             }
-          ]
+          ].slice(-50) // MEMORY FIX: Limit debug logs
         }));
       });
 
@@ -196,7 +223,12 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           currentFrame: data.currentFrame ?? prev.currentFrame,
           totalFrames: data.totalFrames ?? prev.totalFrames,
           previewImage: data.preview_image ?? prev.previewImage,
-          processedFrames: data.all_frames ?? prev.processedFrames,
+          // MEMORY FIX: Build frame URLs array efficiently based on current frame number
+          processedFrames: data.currentFrame ? 
+            // Generate URLs for all frames up to current frame
+            Array.from({length: Math.min(data.currentFrame, 500)}, (_, i) => 
+              `/frames/${data.session_id || sessionIdRef.current}/${String(i + 1).padStart(4, '0')}`
+            ) : prev.processedFrames,
           statusMessage: data.message ?? prev.statusMessage,
         }));
       });
@@ -250,8 +282,36 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
               timestamp: data.timestamp || Date.now() / 1000,
               sessionId: data.session_id || 'unknown'
             }
-          ]
+          ].slice(-50) // MEMORY FIX: Keep only last 50 logs to prevent memory accumulation
         }));
+      });
+      
+      // System warnings (memory, GPU, etc.)
+      newSocket.on('system_warning', (data) => {
+        console.log('System warning received:', data);
+        setState(prev => ({
+          ...prev,
+          systemWarning: {
+            type: data.type,
+            severity: data.severity || 'warning',
+            title: data.title,
+            message: data.message,
+            timestamp: Date.now()
+          }
+        }));
+        
+        // Auto-dismiss warnings after 10 seconds (errors stay until dismissed)
+        if (data.severity === 'warning') {
+          setTimeout(() => {
+            setState(prev => {
+              // Only clear if it's the same warning (check timestamp)
+              if (prev.systemWarning && prev.systemWarning.type === data.type) {
+                return { ...prev, systemWarning: null };
+              }
+              return prev;
+            });
+          }, 10000);
+        }
       });
 
       socketRef.current = newSocket;
@@ -344,7 +404,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           timestamp: Date.now() / 1000,
           sessionId: 'frontend'
         }
-      ]
+      ].slice(-50) // MEMORY FIX: Limit debug logs
     }));
 
     try {
@@ -404,6 +464,9 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
 
       const result = await response.json();
       setState(prev => ({ ...prev, sessionId: result.session_id }));
+      
+      // Store session ID globally for cleanup purposes
+      (window as any).currentSessionId = result.session_id;
     } catch (error) {
       setState(prev => ({
         ...prev,
@@ -424,6 +487,9 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ session_id: state.sessionId }),
       });
 
+      // Clear the global session tracking
+      (window as any).currentSessionId = null;
+      
       setState(prev => ({
         ...prev,
         processingStatus: 'idle',
@@ -433,14 +499,16 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         totalFrames: 0,
         elapsedTime: 0,
         previewImage: null,
+        processedFrames: [],
+        selectedFrameIndex: 0,
         debugLogs: [
           ...prev.debugLogs,
           {
-            message: '🛑 Cancel request sent to backend',
+            message: '🛑 Cancel request sent to backend (frames cleaned up)',
             timestamp: Date.now() / 1000,
             sessionId: 'frontend'
           }
-        ]
+        ].slice(-50) // MEMORY FIX: Limit debug logs
       }));
     } catch (error) {
       // Cancellation error
@@ -610,7 +678,26 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     }
   }, [state.outputFile, state.outputFormat, state.debugInfo]);
 
-  const resetState = useCallback(() => {
+  const resetState = useCallback(async () => {
+    // AGGRESSIVE CLEANUP - Clean up session if exists
+    const sessionToClean = state.sessionId || (window as any).currentSessionId;
+    if (sessionToClean) {
+      try {
+        const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+        await fetch(`${API_BASE}/api/cleanup_session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionToClean }),
+        });
+        console.log('✅ AGGRESSIVE cleanup for session:', sessionToClean);
+      } catch (error) {
+        console.error('Error cleaning up session:', error);
+      }
+    }
+    
+    // Clear the global session tracking
+    (window as any).currentSessionId = null;
+    
     setState(prev => ({
       ...prev,
       uploadedVideo: null,
@@ -625,7 +712,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       selectedFrameIndex: 0,
       outputFile: null,
     }));
-  }, []);
+  }, [state.sessionId]);
 
   // Direct download method that gets raw video data
   const downloadVideoDirectly = useCallback(async () => {
