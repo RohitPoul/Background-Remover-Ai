@@ -27,6 +27,7 @@ import ProcessingControls from './ProcessingControls';
 import DualVideoPreview from './DualVideoPreview';
 import ProcessingProgress from './ProcessingProgress';
 import HardwareStatus from './HardwareStatus';
+import SystemAlert from './SystemAlert';
 import { useVideoProcessor } from '../context/VideoProcessorContext';
 
 const steps = [
@@ -342,6 +343,9 @@ export default function VideoProcessor() {
           Video processed successfully! Click the download button to save your video.
         </Alert>
       </Snackbar>
+
+      {/* System Alerts (Memory warnings, etc.) */}
+      <SystemAlert />
     </Container>
   );
 }
