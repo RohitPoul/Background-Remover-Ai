@@ -112,7 +112,8 @@ def print_gpu_detection():
     print(f"2. PyTorch compiled with CUDA: {torch.version.cuda if hasattr(torch.version, 'cuda') else 'No CUDA support'}")
     
     # Step 2: Check if CUDA is available
-    print(f"3. torch.cuda.is_available(): {torch.cuda.is_available()}")
+    cuda_available = torch.cuda.is_available()
+    print(f"3. torch.cuda.is_available(): {cuda_available}")
 
     if cuda_available:
         # Step 3: Get GPU details
@@ -200,6 +201,19 @@ def check_memory_available():
         memory = psutil.virtual_memory()
         available_gb = memory.available / (1024 ** 3)
         print(f"Available memory: {available_gb:.2f} GB")
+        
+        # Emit memory status to frontend
+        if available_gb < 2.0:
+            socketio.emit('system_warning', {
+                'type': 'insufficient_memory',
+                'severity': 'error',
+                'title': 'Insufficient Memory',
+                'message': f'Only {available_gb:.1f}GB of RAM available. At least 2GB is required to load AI models. Please close other applications to free up memory.',
+                'available_gb': available_gb,
+                'required_gb': 2.0
+            })
+            debug_log(f"⚠️ MEMORY WARNING: Only {available_gb:.1f}GB available, need 2GB minimum", "system")
+        
         # Require at least 2GB free memory to load lite models (more reasonable)
         # BiRefNet_lite should work with 2-3GB available memory
         return available_gb >= 2.0
@@ -208,14 +222,33 @@ def check_memory_available():
         return True  # Assume it's OK if we can't check
 
 def monitor_memory_usage(session_id):
-    """Monitor memory usage during processing"""
+    """Monitor both RAM and VRAM usage during processing"""
     try:
         import psutil
         memory = psutil.virtual_memory()
-        print(f"[{session_id}] DEBUG: Current memory usage: {memory.percent:.1f}%")
+        print(f"[{session_id}] DEBUG: System RAM usage: {memory.percent:.1f}%")
+        
+        # Also monitor GPU VRAM if available
+        if torch.cuda.is_available():
+            vram_allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
+            vram_reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
+            vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+            vram_percent = (vram_allocated / vram_total) * 100
+            print(f"[{session_id}] DEBUG: GPU VRAM: {vram_allocated:.1f}/{vram_total:.1f} GB ({vram_percent:.1f}%)")
         
         if memory.percent > 95:  # Increased threshold to 95%
-            print(f"[{session_id}] CRITICAL: Memory usage at {memory.percent:.1f}%")
+            print(f"[{session_id}] CRITICAL: System RAM usage at {memory.percent:.1f}%")
+            
+            # Emit critical memory warning to frontend
+            socketio.emit('system_warning', {
+                'type': 'critical_memory',
+                'severity': 'error',
+                'title': 'Critical Memory Usage',
+                'message': f'Memory usage has reached {memory.percent:.0f}%. Processing will be stopped to prevent system crash. Please close other applications and try again.',
+                'memory_percent': memory.percent,
+                'session_id': session_id
+            })
+            
             # Force garbage collection before stopping
             gc.collect()
             if torch.cuda.is_available():
@@ -223,6 +256,17 @@ def monitor_memory_usage(session_id):
             return False
         elif memory.percent > 85:  # Warning at 85%
             print(f"[{session_id}] WARNING: Memory usage at {memory.percent:.1f}%")
+            
+            # Emit memory warning to frontend
+            socketio.emit('system_warning', {
+                'type': 'high_memory',
+                'severity': 'warning',
+                'title': 'High Memory Usage',
+                'message': f'Memory usage is at {memory.percent:.0f}%. Consider closing other applications to avoid processing interruption.',
+                'memory_percent': memory.percent,
+                'session_id': session_id
+            })
+            
             # Proactive cleanup at warning level
             gc.collect()
         return True
@@ -242,6 +286,43 @@ def force_memory_cleanup():
             torch._C._cuda_emptyCache()
     except Exception as e:
         print(f"Memory cleanup warning: {e}")
+
+def unload_models_from_gpu():
+    """Unload models from GPU to free memory - can be called when needed"""
+    global birefnet, birefnet_lite, models_loaded
+    try:
+        if birefnet is not None:
+            birefnet.cpu()
+            debug_log("[MEMORY] Moved BiRefNet to CPU", "system")
+        if birefnet_lite is not None:
+            birefnet_lite.cpu()
+            debug_log("[MEMORY] Moved BiRefNet_lite to CPU", "system")
+        
+        # Clear GPU cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            debug_log("[MEMORY] Cleared GPU cache", "system")
+        
+        # Note: models_loaded stays True as models are still in memory, just on CPU
+        return True
+    except Exception as e:
+        debug_log(f"[MEMORY] Error unloading models: {e}", "system")
+        return False
+
+def reload_models_to_gpu():
+    """Reload models back to GPU when needed"""
+    global birefnet, birefnet_lite
+    try:
+        if birefnet is not None and device == 'cuda':
+            birefnet.to(device)
+            debug_log("[MEMORY] Moved BiRefNet back to GPU", "system")
+        if birefnet_lite is not None and device == 'cuda':
+            birefnet_lite.to(device)
+            debug_log("[MEMORY] Moved BiRefNet_lite back to GPU", "system")
+        return True
+    except Exception as e:
+        debug_log(f"[MEMORY] Error reloading models to GPU: {e}", "system")
+        return False
 
 def cleanup_on_exit():
     """Cleanup function called on exit"""
@@ -497,6 +578,27 @@ def cleanup_temp_file(filepath):
                 temp_files.remove(filepath)
     except Exception as e:
         print(f"Error cleaning up {filepath}: {e}")
+
+def cleanup_session_frames(session_id):
+    """Clean up frame directory for a specific session"""
+    import shutil
+    frame_dir = f"frames_{session_id}"
+    
+    try:
+        if os.path.exists(frame_dir):
+            # Count frames before deletion for logging
+            png_count = len([f for f in os.listdir(frame_dir) if f.endswith('.png')])
+            npy_count = len([f for f in os.listdir(frame_dir) if f.endswith('.npy')])
+            
+            # MEMORY FIX: Delete all frame files to free disk space
+            shutil.rmtree(frame_dir)
+            debug_log(f"[CLEANUP] Removed frame directory: {frame_dir} ({png_count} PNG, {npy_count} NPY files)", session_id)
+            print(f"Cleaned up frame directory: {frame_dir} ({png_count} PNG, {npy_count} NPY files)")
+            return True
+    except Exception as e:
+        debug_log(f"[CLEANUP] Error removing frame directory {frame_dir}: {e}", session_id)
+        print(f"Error cleaning up frame directory {frame_dir}: {e}")
+        return False
 
 def cleanup_all_temp_files():
     """Clean up all temporary files"""
@@ -789,21 +891,35 @@ def image_to_base64(image):
     return f"data:image/png;base64,{img_str}"
 
 def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, video_handling, fast_mode, max_workers, output_format='mp4'):
-    debug_log(f"\n[{session_id}] === ASYNC PROCESSING STARTED ===", session_id)
-    debug_log(f"[{session_id}] Thread ID: {threading.current_thread().ident}", session_id)
-    debug_log(f"[{session_id}] Video path exists: {os.path.exists(video_path)}", session_id)
-    debug_log(f"[{session_id}]  CRITICAL PARAMETERS:", session_id)
-    debug_log(f"[{session_id}]   - bg_type = '{bg_type}' (type: {type(bg_type).__name__})", session_id)
-    debug_log(f"[{session_id}]   - output_format = '{output_format}' (type: {type(output_format).__name__})", session_id)
-    debug_log(f"[{session_id}]   - fast_mode = {fast_mode}", session_id)
-    debug_log(f"[{session_id}]   - Is bg_type == 'Transparent'? {bg_type == 'Transparent'}", session_id)
-    debug_log(f"[{session_id}]   - output_format.lower() = '{output_format.lower()}'", session_id)
+    debug_log(f"\n🎬 === ASYNC PROCESSING THREAD STARTED ===", session_id)
+    debug_log(f"🆔 Session: {session_id}", session_id)
+    debug_log(f"🧵 Thread ID: {threading.current_thread().ident}", session_id)
+    debug_log(f"📍 Thread name: {threading.current_thread().name}", session_id)
+    
+    # Check video file
+    debug_log(f"📹 Checking video file...", session_id)
+    debug_log(f"  - Path: {video_path}", session_id)
+    debug_log(f"  - Exists: {os.path.exists(video_path)}", session_id)
+    if os.path.exists(video_path):
+        debug_log(f"  - Size: {os.path.getsize(video_path) / (1024*1024):.2f} MB", session_id)
+    
+    debug_log(f"⚙️ PROCESSING PARAMETERS:", session_id)
+    debug_log(f"  - Background type: '{bg_type}'", session_id)
+    debug_log(f"  - Output format: '{output_format}'", session_id)
+    debug_log(f"  - Fast mode: {fast_mode}", session_id)
+    debug_log(f"  - Max workers: {max_workers}", session_id)
+    debug_log(f"  - FPS: {fps}", session_id)
+    debug_log(f"  - Color: {color}", session_id)
+    debug_log(f"  - Is Transparent? {bg_type == 'Transparent'}", session_id)
     
     # Check if models are loaded
     global birefnet, birefnet_lite
-    debug_log(f"[{session_id}] Model check - birefnet: {birefnet is not None}, birefnet_lite: {birefnet_lite is not None}", session_id)
+    debug_log(f"🤖 Checking AI models...", session_id)
+    debug_log(f"  - BiRefNet (full): {'✅ Loaded' if birefnet is not None else '❌ Not loaded'}", session_id)
+    debug_log(f"  - BiRefNet Lite: {'✅ Loaded' if birefnet_lite is not None else '❌ Not loaded'}", session_id)
+    
     if birefnet is None and birefnet_lite is None:
-        debug_log(f"[{session_id}] ERROR: No models loaded!", session_id)
+        debug_log(f"❌ ERROR: No AI models loaded! Cannot process video.", session_id)
         socketio.emit('processing_error', {
             'session_id': session_id,
             'status': 'error',
@@ -812,21 +928,42 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         })
         return
     
+    debug_log(f"✅ AI models are ready!", session_id)
+    
+    debug_log(f"🔧 Initializing variables...", session_id)
     video = None
     background_video = None
     processed_video = None
     
+    debug_log(f"🧹 Running garbage collection before starting...", session_id)
     # Force garbage collection before starting
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    debug_log(f"✅ Memory cleanup complete", session_id)
     
     try:
-        debug_log(f"[{session_id}] Starting video processing with settings: bg_type={bg_type}, fast_mode={fast_mode}, max_workers={max_workers}", session_id)
+        debug_log(f"🚀 Starting video processing...", session_id)
         start_time = time.time()
-        debug_log(f"[{session_id}] Loading video from: {video_path}", session_id)
-        video = VideoFileClip(video_path)
-        debug_log(f"[{session_id}] Video loaded successfully: duration={video.duration}s, fps={video.fps}", session_id)
+        
+        debug_log(f"📹 Loading video file...", session_id)
+        debug_log(f"  - Path: {video_path}", session_id)
+        
+        try:
+            video = VideoFileClip(video_path)
+            debug_log(f"✅ Video loaded successfully!", session_id)
+            debug_log(f"  - Duration: {video.duration:.2f} seconds", session_id)
+            debug_log(f"  - FPS: {video.fps}", session_id)
+            debug_log(f"  - Size: {video.size} (width x height)", session_id)
+        except Exception as load_error:
+            debug_log(f"❌ ERROR loading video: {str(load_error)}", session_id)
+            socketio.emit('processing_error', {
+                'session_id': session_id,
+                'status': 'error',
+                'message': f'Failed to load video: {str(load_error)}',
+                'elapsed_time': 0
+            })
+            return
         if fps == 0:
             fps = video.fps
             debug_log(f"[{session_id}] Using original video FPS: {fps}", session_id)
@@ -839,8 +976,14 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         
         # Load frames based on available memory
         debug_log(f"[{session_id}] Loading video frames...", session_id)
+        debug_log(f"🎞️ Extracting frames from video at {fps} FPS...", session_id)
         frames = list(video.iter_frames(fps=fps))
         total_frames = len(frames)
+        debug_log(f"✅ Successfully extracted {total_frames} frames!", session_id)
+        debug_log(f"📊 Frame info:", session_id)
+        if len(frames) > 0:
+            debug_log(f"  - Frame shape: {frames[0].shape}", session_id)
+            debug_log(f"  - Frame dtype: {frames[0].dtype}", session_id)
         debug_log(f"[{session_id}] Total frames to process: {total_frames}", session_id)
         
         debug_log(f"[{session_id}] Emitting processing_update event to client", session_id)
@@ -855,7 +998,10 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         })
         debug_log(f"[{session_id}] Event emitted", session_id)
         
-        processed_frames = []
+        # MEMORY FIX: Use frame paths instead of keeping frames in memory
+        processed_frame_paths = []
+        frames_dir = f"frames_{session_id}"
+        os.makedirs(frames_dir, exist_ok=True)
         
         # Handle background setup
         background_frames = None
@@ -949,18 +1095,22 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 background_frames = None
 
         # Check memory before processing
+        debug_log(f"💾 Checking memory usage...", session_id)
         if not monitor_memory_usage(session_id):
+            debug_log(f"❌ CRITICAL: Memory usage too high, stopping!", session_id)
             print(f"[{session_id}] CRITICAL: Memory usage too high, cancelling processing")
             return
+        debug_log(f"✅ Memory check passed", session_id)
         
         # Use ThreadPoolExecutor for parallel processing - exactly like Gradio
-        debug_log(f"[{session_id}] Starting ThreadPoolExecutor with max_workers={max_workers}", session_id)
+        debug_log(f"🔧 Starting ThreadPoolExecutor with {max_workers} workers", session_id)
         bg_frame_index = 0  # Initialize background frame index
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all frames for parallel processing - exactly like Gradio
             futures = []
-            debug_log(f"[{session_id}] Submitting {total_frames} frames for processing", session_id)
+            debug_log(f"🚀 Submitting {total_frames} frames for parallel processing...", session_id)
+            debug_log(f"👷 Using {max_workers} worker threads", session_id)
             for i in range(total_frames):
                 futures.append(
                     executor.submit(
@@ -1026,9 +1176,13 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         except Exception as compare_err:
                             debug_log(f"[{session_id}] Error comparing frames: {compare_err}", session_id)
                     
-                    processed_frames.append(result)
+                    # MEMORY FIX: Save frame to disk immediately instead of keeping in memory
+                    frame_filename_npy = os.path.join(frames_dir, f"frame_{i+1:04d}.npy")
+                    np.save(frame_filename_npy, result)
+                    processed_frame_paths.append(frame_filename_npy)
+                    
                     successfully_processed += 1
-                    debug_log(f"[{session_id}] Frame {i+1} collected successfully", session_id)
+                    debug_log(f"[{session_id}] Frame {i+1} saved to disk", session_id)
                     
                     # Save each frame as an image for frame slider [[memory:6712208]]
                     frame_dir = f"frames_{session_id}"
@@ -1037,7 +1191,8 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         debug_log(f"[{session_id}] Created frame directory: {frame_dir}", session_id)
                     
                     # Save frame as image
-                    frame_filename = f"{frame_dir}/frame_{i+1:04d}.png"
+                    frame_filename_png = f"{frame_dir}/frame_{i+1:04d}.png"
+                    frame_image = None  # Initialize to prevent undefined variable errors
                     try:
                         if isinstance(result, np.ndarray):
                             frame_image = Image.fromarray(result.astype(np.uint8))
@@ -1046,24 +1201,47 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         
                         # Save with appropriate format based on transparency
                         if bg_type == "Transparent" and frame_image.mode == 'RGBA':
-                            frame_image.save(frame_filename, 'PNG')
+                            frame_image.save(frame_filename_png, 'PNG')
                         else:
                             # Convert to RGB if needed for non-transparent
                             if frame_image.mode == 'RGBA':
                                 frame_image = frame_image.convert('RGB')
-                            frame_image.save(frame_filename, 'PNG')
+                            frame_image.save(frame_filename_png, 'PNG')
                         
-                        debug_log(f"[{session_id}]  Saved frame {i+1} to {frame_filename} - File exists: {os.path.exists(frame_filename)}", session_id)
+                        debug_log(f"[{session_id}]  Saved frame {i+1} to {frame_filename_png} - File exists: {os.path.exists(frame_filename_png)}", session_id)
                     except Exception as save_err:
                         debug_log(f"[{session_id}] ❌ ERROR saving frame {i+1}: {str(save_err)}", session_id)
+                        # Create frame_image from result if it failed
+                        if frame_image is None and isinstance(result, np.ndarray):
+                            try:
+                                frame_image = Image.fromarray(result.astype(np.uint8))
+                            except:
+                                pass
                     
                     elapsed_time = time.time() - start_time
                     progress = ((i + 1) / total_frames) * 100
                     
-                    # Convert frame to base64 for preview
-                    preview_base64 = image_to_base64(frame_image)
+                    # Convert frame to base64 for preview (only if frame_image exists)
+                    preview_base64 = None
+                    if frame_image is not None:
+                        try:
+                            preview_base64 = image_to_base64(frame_image)
+                        except Exception as preview_err:
+                            debug_log(f"[{session_id}] Error creating preview: {preview_err}", session_id)
+                    elif isinstance(result, np.ndarray):
+                        # Fallback: Use result directly if frame_image is None
+                        try:
+                            preview_base64 = image_to_base64(Image.fromarray(result.astype(np.uint8)))
+                        except:
+                            pass
+                    
+                    # NOW free memory after all uses of result and frame_image
+                    del result
+                    if frame_image is not None:
+                        del frame_image
                     
                     # Send update for EVERY frame (not just every 5 frames) for the slider
+                    # MEMORY FIX: Only send the current frame URL, not all frames
                     socketio.emit('processing_update', {
                         'session_id': session_id,
                         'status': 'processing',
@@ -1074,18 +1252,33 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         'currentFrame': i + 1,
                         'totalFrames': total_frames,
                         'frame_url': f"/frames/{session_id}/{i+1:04d}",  # URL to access saved frame
-                        'all_frames': [f"/frames/{session_id}/{j+1:04d}" for j in range(i+1)]  # All processed frames so far
+                        # REMOVED: 'all_frames' to prevent memory accumulation
                     })
                     # Send progress to debug console [[memory:6712208]]
                     debug_log(f"[{session_id}] Progress: {progress:.1f}%, Frame: {i+1}/{total_frames} (Success: {successfully_processed}, Failed: {len(failed_frames)})", session_id)
+                    
+                    # AGGRESSIVE periodic cleanup every 5 frames to prevent memory buildup
+                    if (i + 1) % 5 == 0:
+                        gc.collect()
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            # Also check memory usage
+                            if not monitor_memory_usage(session_id):
+                                debug_log(f"[{session_id}] CRITICAL: Memory too high, stopping processing", session_id)
+                                break
+                        debug_log(f"[{session_id}] Memory cleaned after frame {i+1}", session_id)
                 except Exception as frame_error:
                     debug_log(f"[{session_id}] ERROR processing frame {i}: {str(frame_error)}", session_id)
                     failed_frames.append(i)
-                    # Use original frame as fallback
-                    if i < len(frames):
-                        processed_frames.append(frames[i])
-                    else:
-                        processed_frames.append(frames[0])
+                    # Clean up GPU memory on error
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    # Use original frame as fallback and save to disk
+                    fallback_frame = frames[i] if i < len(frames) else frames[0]
+                    frame_filename = os.path.join(frames_dir, f"frame_{i+1:04d}.npy")
+                    np.save(frame_filename, fallback_frame)
+                    processed_frame_paths.append(frame_filename)
             
             debug_log(f"[{session_id}] Frame processing complete: {successfully_processed} succeeded, {len(failed_frames)} failed", session_id)
             if failed_frames:
@@ -1105,17 +1298,19 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        # Create final video
-        debug_log(f"[{session_id}] Creating final video with {len(processed_frames)} processed frames", session_id)
+        # Create final video - load frames from disk as needed
+        debug_log(f"[{session_id}] Creating final video with {len(processed_frame_paths)} processed frames", session_id)
 
         
-        # Basic validation of processed frames
-        if processed_frames and len(processed_frames) > 0:
-            first_frame_shape = processed_frames[0].shape
+        # Basic validation - load just the first frame for checking
+        if processed_frame_paths and len(processed_frame_paths) > 0:
+            first_frame = np.load(processed_frame_paths[0])
+            first_frame_shape = first_frame.shape
             if bg_type == "Transparent" and len(first_frame_shape) == 3 and first_frame_shape[2] == 4:
                 debug_log(f"[{session_id}] Using RGBA frames with transparency", session_id)
             elif bg_type == "Transparent" and len(first_frame_shape) == 3 and first_frame_shape[2] == 3:
                 debug_log(f"[{session_id}] WARNING: Expected RGBA but got RGB - transparency may be lost", session_id)
+            del first_frame  # Free memory
         
         # Additional debug info
         debug_log(f"[{session_id}] 🔍 PRE-PROCESSING CHECK:", session_id)
@@ -1135,21 +1330,26 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         
         try:
             # Ensure all frames have the same dimensions AND CHANNELS
-            if processed_frames:
-                first_shape = processed_frames[0].shape
-                print(f"[{session_id}] First frame shape: {first_shape}, dtype: {processed_frames[0].dtype}")
+            # MEMORY FIX: Load frames from disk one at a time for checking
+            if processed_frame_paths:
+                first_frame = np.load(processed_frame_paths[0])
+                first_shape = first_frame.shape
+                print(f"[{session_id}] First frame shape: {first_shape}, dtype: {first_frame.dtype}")
+                del first_frame  # Free memory immediately
                 
                 # Check for channel consistency
                 has_transparency = False
                 rgba_count = 0
                 rgb_count = 0
                 
-                # Count how many frames are RGBA vs RGB
-                for frame in processed_frames:
+                # Count how many frames are RGBA vs RGB - load one at a time
+                for frame_path in processed_frame_paths:
+                    frame = np.load(frame_path)
                     if len(frame.shape) == 3 and frame.shape[2] == 4:  # RGBA
                         rgba_count += 1
                     elif len(frame.shape) == 3 and frame.shape[2] == 3:  # RGB
                         rgb_count += 1
+                    del frame  # Free memory immediately
                 
                 # Determine if we need transparency based on majority
                 if rgba_count > rgb_count:
@@ -1159,8 +1359,10 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                     debug_log(f"[{session_id}] Most frames are RGB ({rgb_count} RGB vs {rgba_count} RGBA) - removing transparency", session_id)
                 
                 # Normalize all frames to the same shape and channel count
-                normalized_frames = []
-                for idx, frame in enumerate(processed_frames):
+                # MEMORY FIX: Process and save normalized frames one at a time
+                normalized_frame_paths = []
+                for idx, frame_path in enumerate(processed_frame_paths):
+                    frame = np.load(frame_path)  # Load frame from disk
                     # First handle resolution differences
                     if frame.shape[:2] != first_shape[:2]:
                         debug_log(f"[{session_id}] Frame {idx} has different resolution: {frame.shape[:2]}, resizing to {first_shape[:2]}", session_id)
@@ -1184,15 +1386,19 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                     if frame.dtype != np.uint8:
                         debug_log(f"[{session_id}] Converting frame {idx} from dtype {frame.dtype} to uint8", session_id)
                         frame = frame.astype(np.uint8)
-                        
-                    normalized_frames.append(frame)
+                    
+                    # Save normalized frame back to disk
+                    normalized_path = frame_path.replace('.npy', '_normalized.npy')
+                    np.save(normalized_path, frame)
+                    normalized_frame_paths.append(normalized_path)
+                    del frame  # Free memory immediately
 
                 
-                debug_log(f"[{session_id}] Creating ImageSequenceClip with {len(normalized_frames)} frames at {fps} fps", session_id)
+                debug_log(f"[{session_id}] Creating ImageSequenceClip with {len(normalized_frame_paths)} frames at {fps} fps", session_id)
                 
-                # Validate transparency support
-                if normalized_frames and len(normalized_frames) > 0:
-                    sample_frame = normalized_frames[0]
+                # Validate transparency support - load first frame to check
+                if normalized_frame_paths and len(normalized_frame_paths) > 0:
+                    sample_frame = np.load(normalized_frame_paths[0])
                     if bg_type == "Transparent" and len(sample_frame.shape) == 3:
                         if sample_frame.shape[2] == 4:
                             debug_log(f"[{session_id}] Frames have alpha channel for transparency", session_id)
@@ -1204,9 +1410,9 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 debug_log(f"[{session_id}] 🚨 TRANSPARENCY DECISION POINT 1:", session_id)
                 debug_log(f"[{session_id}]   - bg_type = '{bg_type}'", session_id)
                 debug_log(f"[{session_id}]   - bg_type == 'Transparent'? {bg_type == 'Transparent'}", session_id)
-                debug_log(f"[{session_id}]   - Has normalized_frames? {normalized_frames is not None and len(normalized_frames) > 0}", session_id)
-                if bg_type == "Transparent" and normalized_frames and len(normalized_frames) > 0:
-                    sample = normalized_frames[0]
+                debug_log(f"[{session_id}]   - Has normalized_frames? {normalized_frame_paths is not None and len(normalized_frame_paths) > 0}", session_id)
+                if bg_type == "Transparent" and normalized_frame_paths and len(normalized_frame_paths) > 0:
+                    sample = np.load(normalized_frame_paths[0])
                     if len(sample.shape) == 3 and sample.shape[2] == 4:
                         debug_log(f"[{session_id}] Creating video with TRANSPARENCY support (RGBA frames detected)", session_id)
                         
@@ -1219,13 +1425,16 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         debug_log(f"[{session_id}] Created temp directory: {temp_dir}", session_id)
                         
                         # Save all RGBA frames as PNG files (preserves transparency)
+                        # MEMORY FIX: Load frames from disk one at a time
                         frame_paths = []
-                        for idx, frame in enumerate(normalized_frames):
+                        for idx, norm_frame_path in enumerate(normalized_frame_paths):
+                            frame = np.load(norm_frame_path)
                             frame_path = os.path.join(temp_dir, f"frame_{idx:06d}.png")
                             # Convert numpy RGBA to PIL and save as PNG
                             pil_frame = Image.fromarray(frame.astype(np.uint8), mode='RGBA')
                             pil_frame.save(frame_path, 'PNG')
                             frame_paths.append(frame_path)
+                            del frame  # Free memory immediately
                         
                         debug_log(f"[{session_id}] Saved {len(frame_paths)} RGBA frames as PNG files", session_id)
                         
@@ -1328,11 +1537,21 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                         debug_log(f"[{session_id}] Direct transparency encoding complete - skipping MoviePy export", session_id)
                     else:
                         debug_log(f"[{session_id}] WARNING: Expected RGBA frames for transparency but got shape {sample.shape}", session_id)
-                        processed_video = ImageSequenceClip(normalized_frames, fps=fps)
+                        # MEMORY FIX: Create a generator function to load frames on demand
+                        def load_frames():
+                            for path in normalized_frame_paths:
+                                frame = np.load(path)
+                                yield frame
+                        processed_video = ImageSequenceClip(list(load_frames()), fps=fps)
                 else:
                     # Non-transparent video - use frames as-is
                     debug_log(f"[{session_id}] Creating standard video (no transparency)", session_id)
-                    processed_video = ImageSequenceClip(normalized_frames, fps=fps)
+                    # MEMORY FIX: Load frames on demand
+                    def load_frames():
+                        for path in normalized_frame_paths:
+                            frame = np.load(path)
+                            yield frame
+                    processed_video = ImageSequenceClip(list(load_frames()), fps=fps)
             
             # Only log duration if processed_video exists (not None from direct FFmpeg path)
             if processed_video is not None:
@@ -1350,7 +1569,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 debug_log(f"[{session_id}] No audio in original video", session_id)
             
             # Check if we have valid frames
-            if not processed_frames and processed_video is None:
+            if not processed_frame_paths and processed_video is None:
                 debug_log(f"[{session_id}] ERROR: No processed frames available!", session_id)
                 raise ValueError("No processed frames to create video")
                 
@@ -1371,17 +1590,28 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 debug_log(f"[{session_id}]  Direct FFmpeg transparent video already exists - skipping fallback", session_id)
                 processed_video = None  # Keep it None to skip MoviePy export
             # Try without audio as fallback
-            elif processed_frames:
+            elif processed_frame_paths:
                 debug_log(f"[{session_id}] Attempting fallback: creating video without audio", session_id)
+                # Load first frame to check format
+                first_frame = np.load(processed_frame_paths[0])
                 # IMPORTANT: Preserve transparency in fallback too!
-                if bg_type == "Transparent" and len(processed_frames[0].shape) == 3 and processed_frames[0].shape[2] == 4:
+                if bg_type == "Transparent" and len(first_frame.shape) == 3 and first_frame.shape[2] == 4:
                     debug_log(f"[{session_id}] Using transparency-preserving fallback for RGBA frames", session_id)
-                    # Use direct RGBA frames in fallback too
-                    processed_video = ImageSequenceClip(processed_frames, fps=fps, with_mask=True)
+                    # MEMORY FIX: Load frames on demand
+                    def load_frames():
+                        for path in processed_frame_paths:
+                            frame = np.load(path)
+                            yield frame
+                    processed_video = ImageSequenceClip(list(load_frames()), fps=fps, with_mask=True)
                     debug_log(f"[{session_id}] Fallback video created with RGBA transparency", session_id)
                 else:
-                    processed_video = ImageSequenceClip(processed_frames, fps=fps)
+                    def load_frames():
+                        for path in processed_frame_paths:
+                            frame = np.load(path)
+                            yield frame
+                    processed_video = ImageSequenceClip(list(load_frames()), fps=fps)
                     debug_log(f"[{session_id}] Fallback video created successfully (no transparency)", session_id)
+                del first_frame
             else:
                 raise
         
@@ -1644,19 +1874,25 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
             'elapsed_time': elapsed_time
         })
     finally:
-        # Clean up video objects to prevent memory leaks and access violations
-        debug_log(f"[{session_id}] Starting cleanup...", session_id)
+        # AGGRESSIVE CLEANUP - FREE ALL MEMORY
+        debug_log(f"[{session_id}] Starting FULL cleanup...", session_id)
+        
+        # 1. Close all video objects
         try:
             if processed_video is not None:
                 processed_video.close()
-                debug_log(f"[{session_id}] Closed processed video", session_id)
+                del processed_video
+                processed_video = None
+                debug_log(f"[{session_id}] Closed and deleted processed video", session_id)
         except Exception as e:
             debug_log(f"[{session_id}] Error closing processed video: {e}", session_id)
         
         try:
             if background_video is not None:
                 background_video.close()
-                debug_log(f"[{session_id}] Closed background video", session_id)
+                del background_video
+                background_video = None
+                debug_log(f"[{session_id}] Closed and deleted background video", session_id)
         except Exception as e:
             debug_log(f"[{session_id}] Error closing background video: {e}", session_id)
         
@@ -1665,25 +1901,45 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                 if hasattr(video, 'audio') and video.audio is not None:
                     video.audio.close()
                 video.close()
-                debug_log(f"[{session_id}] Closed input video", session_id)
+                del video
+                video = None
+                debug_log(f"[{session_id}] Closed and deleted input video", session_id)
         except Exception as e:
             debug_log(f"[{session_id}] Error closing input video: {e}", session_id)
         
+        # 2. Clean up frames - ALWAYS
+        cleanup_session_frames(session_id)
+        
+        # 3. Clean up ALL temp files for this session
+        patterns = [
+            f'input_{session_id}.*',
+            f'bg_{session_id}.*',
+            f'temp_video_{session_id}.*'
+        ]
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                try:
+                    os.remove(filepath)
+                    debug_log(f"[{session_id}] Removed temp file: {filepath}", session_id)
+                except:
+                    pass
+        
+        # 4. Remove from active sessions
         if session_id in active_sessions:
             del active_sessions[session_id]
             debug_log(f"[{session_id}] Session removed from active sessions", session_id)
         
-        # Only cleanup INPUT files (not output files)
-        try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-                debug_log(f"[{session_id}] Removed input video file", session_id)
-            if bg_path and os.path.exists(bg_path):
-                os.remove(bg_path)
-                debug_log(f"[{session_id}] Removed background file", session_id)
-            debug_log(f"[{session_id}] NOTE: Output file preserved for download - will cleanup on app exit or manual removal", session_id)
-        except Exception as cleanup_err:
-            debug_log(f"[{session_id}] Cleanup warning: {cleanup_err}", session_id)
+        # 5. FORCE AGGRESSIVE MEMORY CLEANUP
+        debug_log(f"[{session_id}] Forcing AGGRESSIVE memory cleanup...", session_id)
+        gc.collect()
+        gc.collect()  # Run twice for thorough cleanup
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()  # Wait for GPU to finish
+            debug_log(f"[{session_id}] GPU memory FULLY cleared", session_id)
+        
+        debug_log(f"[{session_id}] CLEANUP COMPLETE - All resources freed", session_id)
 
 # REMOVED DUPLICATE FUNCTION - Using the first one above
 
@@ -1765,51 +2021,67 @@ def get_video_data(filename):
 @app.route('/api/process_video', methods=['POST'])
 def process_video():
     try:
-        debug_log("\n=== VIDEO PROCESSING REQUEST ===", "system")
-        debug_log("Processing video request received...", "system")
-        debug_log(f"Request method: {request.method}", "system")
-        debug_log(f"Request files: {request.files.keys()}", "system")
-        debug_log(f"Request form: {request.form.to_dict()}", "system")
+        debug_log("\n🎬 === NEW VIDEO PROCESSING REQUEST ===", "system")
+        debug_log(f"⏰ Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", "system")
+        debug_log(f"📋 Request method: {request.method}", "system")
+        debug_log(f"📁 Request files: {list(request.files.keys())}", "system")
+        debug_log(f"📝 Request form data: {request.form.to_dict()}", "system")
         
         # Check if models are available
+        debug_log("🔍 Checking if AI models are available...", "system")
         if not models_available:
-            debug_log("ERROR: Models not available", "system")
+            debug_log("❌ ERROR: Models not available", "system")
             return jsonify({'error': 'AI models are not available due to system constraints. Please restart the application or increase virtual memory.'}), 503
         
-        debug_log("Models are available, attempting to load...", "system")
+        debug_log("✅ Models are available, attempting to load...", "system")
         
         # Load models if needed
         if not load_models_if_needed():
-            debug_log("ERROR: Failed to load models", "system")
+            debug_log("❌ ERROR: Failed to load models", "system")
             return jsonify({'error': 'Failed to load AI models. Please restart the application or increase virtual memory.'}), 503
             
-        debug_log("Models loaded successfully, proceeding with video processing...", "system")
+        debug_log("✅ Models loaded successfully!", "system")
             
         session_id = str(uuid.uuid4())
+        debug_log(f"🆔 Generated Session ID: {session_id}", "system")
+        
         active_sessions[session_id] = {
             'client_id': request.remote_addr or 'unknown',
             'status': 'processing'
         }
-        debug_log(f"Created session: {session_id} for client: {request.remote_addr}", session_id)
+        debug_log(f"📍 Client IP: {request.remote_addr}", session_id)
+        debug_log(f"✅ Session {session_id} added to active sessions", session_id)
         
         # Get form data
         video_file = request.files.get('video')
-        bg_type = request.form.get('bg_type', 'Color')
-        debug_log(f"\n BACKGROUND TYPE FROM FORM:", session_id)
-        debug_log(f"  - Raw value: '{bg_type}'", session_id)
-        debug_log(f"  - Type: {type(bg_type).__name__}", session_id)
-        debug_log(f"  - Is 'Transparent'? {bg_type == 'Transparent'}", session_id)
-        debug_log(f"  - Default if missing: 'Color'", session_id)
+        debug_log(f"📹 Video file received: {video_file is not None}", session_id)
+        if video_file:
+            debug_log(f"📹 Video filename: {video_file.filename}", session_id)
+            debug_log(f"📹 Video content type: {video_file.content_type}", session_id)
         
-        color = request.form.get('color', '#00FF00')
+        # Try different field names for background type
+        bg_type = request.form.get('bg_type') or request.form.get('background_type', 'Color')
+        debug_log(f"🎨 BACKGROUND TYPE:", session_id)
+        debug_log(f"  - Raw form keys: {list(request.form.keys())}", session_id)
+        debug_log(f"  - bg_type value: '{request.form.get('bg_type')}'", session_id)
+        debug_log(f"  - background_type value: '{request.form.get('background_type')}'", session_id)
+        debug_log(f"  - Final value: '{bg_type}'", session_id)
+        debug_log(f"  - Is Transparent? {bg_type == 'Transparent'}", session_id)
+        
+        # Try different field name variations
+        color = request.form.get('color') or request.form.get('background_color', '#00FF00')
         fps = int(request.form.get('fps', 0))
         video_handling = request.form.get('video_handling', 'slow_down')
         fast_mode = request.form.get('fast_mode', 'true').lower() == 'true'
         output_format = request.form.get('output_format', 'mp4')
-        debug_log(f"\n OUTPUT FORMAT FROM FORM:", session_id)
-        debug_log(f"  - Raw value: '{output_format}'", session_id)
-        debug_log(f"  - Lowercase: '{output_format.lower()}'", session_id)
-        debug_log(f"  - Is 'webm'? {output_format.lower() == 'webm'}", session_id)
+        
+        debug_log(f"⚙️ Processing parameters:", session_id)
+        debug_log(f"  - Background type: {bg_type}", session_id)
+        debug_log(f"  - Color: {color}", session_id)
+        debug_log(f"  - FPS: {fps}", session_id)
+        debug_log(f"  - Video handling: {video_handling}", session_id)
+        debug_log(f"  - Fast mode: {fast_mode}", session_id)
+        debug_log(f"  - Output format: {output_format}", session_id)
         # Get max_workers from hardware optimizer
         try:
             # Use hardware-optimized worker count
@@ -1826,12 +2098,21 @@ def process_video():
             max_workers = hw_settings.get('max_workers', 2)
         
         if not video_file:
+            debug_log("❌ ERROR: No video file provided!", session_id)
             return jsonify({'error': 'No video file provided'}), 400
         
         # Save uploaded video
         video_filename = secure_filename(f"input_{session_id}_{video_file.filename}")
         video_path = os.path.join(tempfile.gettempdir(), video_filename)
-        video_file.save(video_path)
+        debug_log(f"💾 Saving video to: {video_path}", session_id)
+        
+        try:
+            video_file.save(video_path)
+            debug_log(f"✅ Video saved successfully!", session_id)
+            debug_log(f"📊 File size: {os.path.getsize(video_path) / (1024*1024):.2f} MB", session_id)
+        except Exception as e:
+            debug_log(f"❌ ERROR saving video: {str(e)}", session_id)
+            return jsonify({'error': f'Failed to save video: {str(e)}'}), 500
         
         # Track temp file for cleanup
         temp_files.add(video_path)
@@ -1850,8 +2131,16 @@ def process_video():
                 temp_files.add(bg_path)
         
         # Start processing in background
-        debug_log(f"Starting background thread for session {session_id}", session_id)
-        debug_log(f"Thread args: video_path={video_path}, bg_type={bg_type}, bg_path={bg_path}, color={color}, fps={fps}, video_handling={video_handling}, fast_mode={fast_mode}, max_workers={max_workers}, output_format={output_format}", session_id)
+        debug_log(f"🚀 Starting processing thread for session {session_id}", session_id)
+        debug_log(f"📋 Thread parameters:", session_id)
+        debug_log(f"  - video_path: {video_path}", session_id)
+        debug_log(f"  - bg_type: {bg_type}", session_id)
+        debug_log(f"  - bg_path: {bg_path}", session_id)
+        debug_log(f"  - color: {color}", session_id)
+        debug_log(f"  - fps: {fps}", session_id)
+        debug_log(f"  - fast_mode: {fast_mode}", session_id)
+        debug_log(f"  - max_workers: {max_workers}", session_id)
+        debug_log(f"  - output_format: {output_format}", session_id)
         
         thread = threading.Thread(
             target=process_video_async,
@@ -1860,6 +2149,8 @@ def process_video():
         )
         thread.start()
         
+        debug_log(f"✅ Thread started successfully!", session_id)
+        debug_log(f"🔄 Processing is now running in background", session_id)
         print(f"Thread started for session {session_id}")
         print("=== END VIDEO PROCESSING REQUEST ===\n")
         
@@ -1869,9 +2160,11 @@ def process_video():
         })
         
     except Exception as e:
+        debug_log(f"❌ ERROR in process_video endpoint: {str(e)}", "system")
         print(f"ERROR in process_video endpoint: {e}")
         import traceback
         traceback.print_exc()
+        debug_log(f"📋 Stack trace: {traceback.format_exc()}", "system")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cancel_processing', methods=['POST'])
@@ -1879,37 +2172,56 @@ def cancel_processing():
     session_id = request.json.get('session_id')
     print(f"[CANCEL] Received cancellation request for session: {session_id}")
     
+    # Mark session as cancelled first (even if not in active_sessions)
     if session_id in active_sessions:
-        # Mark session as cancelled
         active_sessions[session_id] = False
         del active_sessions[session_id]
-        
-        # Force aggressive memory cleanup
-        print(f"[CANCEL] Forcing memory cleanup for session: {session_id}")
-        force_memory_cleanup()
-        
-        # Kill any lingering threads
-        import threading
-        for thread in threading.enumerate():
-            if thread.name and session_id in thread.name:
-                print(f"[CANCEL] Found thread for session {session_id}, attempting to stop")
-                # Note: We can't forcefully kill threads in Python, but marking session as cancelled
-                # will cause the processing loop to exit
-        
-        # Additional cleanup
-        gc.collect()
-        
-        # Send cancellation event to client
-        socketio.emit('processing_cancelled', {
-            'session_id': session_id,
-            'message': 'Processing cancelled and resources cleaned'
-        })
-        
-        print(f"[CANCEL] Successfully cancelled session: {session_id}")
-        return jsonify({'message': 'Processing cancelled and resources cleaned'})
     
-    print(f"[CANCEL] Session not found: {session_id}")
-    return jsonify({'error': 'Session not found'}), 404
+    # AGGRESSIVE CLEANUP - Clean EVERYTHING for this session
+    print(f"[CANCEL] Starting AGGRESSIVE cleanup for session: {session_id}")
+    
+    # 1. Clean up frames
+    cleanup_session_frames(session_id)
+    
+    # 2. Clean up ALL files for this session
+    patterns = [
+        f'input_{session_id}.*',
+        f'bg_{session_id}.*',
+        f'temp_video_{session_id}.*',
+        f'temp_output_{session_id}*'  # Also clean output files on cancel
+    ]
+    for pattern in patterns:
+        for filepath in glob.glob(pattern):
+            try:
+                os.remove(filepath)
+                print(f"[CANCEL] Removed file: {filepath}")
+            except:
+                pass
+    
+    # 3. Kill any lingering threads
+    import threading
+    for thread in threading.enumerate():
+        if thread.name and session_id in thread.name:
+            print(f"[CANCEL] Found thread for session {session_id}")
+    
+    # 4. FORCE AGGRESSIVE memory cleanup
+    print(f"[CANCEL] Forcing AGGRESSIVE memory cleanup for session: {session_id}")
+    gc.collect()
+    gc.collect()  # Run twice
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        print(f"[CANCEL] GPU memory FULLY cleared")
+    
+    # Send cancellation event to client
+    socketio.emit('processing_cancelled', {
+        'session_id': session_id,
+        'message': 'Processing cancelled and ALL resources cleaned'
+    })
+    
+    print(f"[CANCEL] Successfully cancelled and cleaned session: {session_id}")
+    return jsonify({'message': 'Processing cancelled and ALL resources cleaned'})
 
 # Send debug info to frontend via socket
 def send_debug_to_frontend(session_id, message):
@@ -2021,6 +2333,60 @@ def get_frame(session_id, frame_number):
     except Exception as e:
         debug_log(f"[FRAME] Error serving frame: {str(e)}", "frame_serve")
         return jsonify({'error': 'Failed to load frame', 'details': str(e)}), 500
+
+@app.route('/api/cleanup_session', methods=['POST'])
+def cleanup_session():
+    """Endpoint to cleanup ALL resources for a session - AGGRESSIVE"""
+    session_id = request.json.get('session_id')
+    debug_log(f"[CLEANUP] Received cleanup request for session: {session_id}", session_id)
+    
+    # Remove from active sessions if still there
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+        debug_log(f"[CLEANUP] Removed from active sessions", session_id)
+    
+    # 1. Clean up frames
+    frames_cleaned = cleanup_session_frames(session_id)
+    
+    # 2. Clean up ALL files for this session
+    patterns = [
+        f'input_{session_id}.*',
+        f'bg_{session_id}.*',
+        f'temp_video_{session_id}.*',
+        f'temp_output_{session_id}*',  # Also clean output files
+        f'frames_{session_id}'  # Frame directory
+    ]
+    
+    files_cleaned = 0
+    for pattern in patterns:
+        for filepath in glob.glob(pattern):
+            try:
+                if os.path.isdir(filepath):
+                    import shutil
+                    shutil.rmtree(filepath)
+                else:
+                    os.remove(filepath)
+                files_cleaned += 1
+                debug_log(f"[CLEANUP] Removed: {filepath}", session_id)
+            except Exception as e:
+                debug_log(f"[CLEANUP] Error removing {filepath}: {e}", session_id)
+    
+    # 3. FORCE MEMORY CLEANUP
+    gc.collect()
+    gc.collect()  # Run twice for thorough cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        debug_log(f"[CLEANUP] GPU memory cleared", session_id)
+    
+    debug_log(f"[CLEANUP] AGGRESSIVE cleanup complete - frames: {frames_cleaned}, files: {files_cleaned}", session_id)
+    
+    return jsonify({
+        'success': True,
+        'frames_cleaned': frames_cleaned,
+        'files_cleaned': files_cleaned,
+        'message': 'All resources cleaned'
+    })
 
 @app.route('/api/download/<filename>')
 def download_file(filename):
@@ -2225,18 +2591,58 @@ def test_endpoint():
 
 
 
+@app.route('/api/check_memory', methods=['GET'])
+def check_memory_endpoint():
+    """Endpoint to manually trigger memory check and warnings"""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        available_gb = memory.available / (1024 ** 3)
+        
+        # Check memory and emit warnings if needed
+        memory_ok = check_memory_available()
+        
+        return jsonify({
+            'status': 'ok',
+            'memory_available_gb': available_gb,
+            'memory_percent': memory.percent,
+            'models_can_load': memory_ok,
+            'warning_sent': not memory_ok
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        })
+
 @app.route('/api/hardware_status', methods=['GET'])
 def hardware_status():
     """Get current hardware configuration and status"""
     try:
         # Get GPU name if available
         gpu_name = "Not Available"
+        gpu_vram_info = {}
+        
         if device == 'cuda' and torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
+            
+            # Get VRAM usage
+            vram_allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
+            vram_reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
+            vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
+            vram_free = vram_total - vram_allocated
+            
+            gpu_vram_info = {
+                'vram_total_gb': round(vram_total, 2),
+                'vram_allocated_gb': round(vram_allocated, 2),
+                'vram_reserved_gb': round(vram_reserved, 2),
+                'vram_free_gb': round(vram_free, 2),
+                'vram_usage_percent': round((vram_allocated / vram_total) * 100, 1)
+            }
         elif device == 'mps':
             gpu_name = "Apple M1/M2 GPU"
         
-        # Get current memory usage
+        # Get current system RAM usage
         import psutil
         memory = psutil.virtual_memory()
         
@@ -2246,6 +2652,7 @@ def hardware_status():
                 'processing_device': device.upper(),
                 'gpu_name': gpu_name,
                 'gpu_available': torch.cuda.is_available(),
+                'gpu_vram': gpu_vram_info,  # Added VRAM info
                 'cpu_cores': psutil.cpu_count(logical=False),
                 'cpu_threads': psutil.cpu_count(logical=True),
                 'memory_gb': round(memory.total / (1024**3), 1),
@@ -2405,14 +2812,34 @@ def handle_disconnect():
             sessions_to_remove.append(session_id)
     
     for session_id in sessions_to_remove:
-        print(f"Cancelling session {session_id} for disconnected client")
+        print(f"AGGRESSIVE cleanup for disconnected session {session_id}")
         if session_id in active_sessions:
             del active_sessions[session_id]
-        # Only clean up INPUT files on disconnect, preserve OUTPUT files for download
-        for pattern in [f'input_{session_id}.*', f'bg_{session_id}.*']:
+        
+        # AGGRESSIVE CLEANUP for disconnected sessions
+        cleanup_session_frames(session_id)
+        
+        # Clean up ALL files for this session (including output on disconnect)
+        patterns = [
+            f'input_{session_id}.*',
+            f'bg_{session_id}.*',
+            f'temp_video_{session_id}.*',
+            f'temp_output_{session_id}*'  # Also clean output files on disconnect
+        ]
+        for pattern in patterns:
             for filepath in glob.glob(pattern):
-                cleanup_temp_file(filepath)
-        debug_log(f"[DISCONNECT] Preserved output files for session {session_id} - use /api/cleanup_files to remove manually", "system")
+                try:
+                    os.remove(filepath)
+                    print(f"[DISCONNECT] Removed: {filepath}")
+                except:
+                    pass
+        
+        debug_log(f"[DISCONNECT] AGGRESSIVE cleanup complete for session {session_id}", "system")
+    
+    # Force memory cleanup after disconnect
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 import atexit
 import signal
