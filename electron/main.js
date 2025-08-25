@@ -292,7 +292,7 @@ ipcMain.handle('close-window', () => {
 
 // Cleanup function for temp files (only on app exit)
 function cleanupTempFiles() {
-  console.log('App exiting - cleaning up temporary files...');
+  console.log('App exiting - cleaning up temporary files and frame directories...');
   const glob = require('glob');
   // Only clean up INPUT files automatically, preserve OUTPUT files for user
   const patterns = ['input_*.mp4', 'bg_*.*', 'temp_video_*.mp4'];
@@ -308,8 +308,23 @@ function cleanupTempFiles() {
     });
   });
   
+  // Clean up frame directories
+  const frameDirs = glob.sync('frames_*');
+  frameDirs.forEach(dir => {
+    try {
+      if (fs.existsSync(dir)) {
+        const frameCount = fs.readdirSync(dir).filter(f => f.endsWith('.png')).length;
+        // Use recursive removal for directories
+        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`Deleted frame directory: ${dir} (${frameCount} frames)`);
+      }
+    } catch (err) {
+      console.error(`Failed to delete frame directory ${dir}:`, err);
+    }
+  });
+  
   // Log preserved files
-  const outputPatterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov', 'temp_output_*_preview.webm'];
+  const outputPatterns = ['temp_output_*.mp4', 'temp_output_*.webm', 'temp_output_*.mov', 'temp_output_*_transparent.mov', 'temp_output_*_preview.webm'];
   let preservedCount = 0;
   outputPatterns.forEach(pattern => {
     preservedCount += glob.sync(pattern).length;
