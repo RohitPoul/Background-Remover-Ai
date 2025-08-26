@@ -309,15 +309,19 @@ export default function VideoProcessor() {
       {/* Connection Error Alert */}
       {connectionError && (
         <Alert
-          severity="error"
+          severity={connectionError.includes('Waiting for Python server to start') ? 'info' : 'error'}
           sx={{
             position: 'fixed',
             bottom: 20,
             left: '50%',
             transform: 'translateX(-50%)',
             maxWidth: 600,
-            boxShadow: '0 8px 32px rgba(239, 68, 68, 0.3)',
-            border: '1px solid rgba(239, 68, 68, 0.5)',
+            boxShadow: connectionError.includes('Waiting for Python server to start')
+              ? '0 8px 32px rgba(59, 130, 246, 0.25)'
+              : '0 8px 32px rgba(239, 68, 68, 0.3)',
+            border: connectionError.includes('Waiting for Python server to start')
+              ? '1px solid rgba(59, 130, 246, 0.5)'
+              : '1px solid rgba(239, 68, 68, 0.5)',
             background: 'rgba(26, 31, 58, 0.95)',
           }}
         >
