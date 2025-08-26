@@ -11,6 +11,25 @@ import torch
 from torchvision import transforms
 from PIL import Image
 import numpy as np
+
+# Import safe CUDA wrappers
+try:
+    from cuda_safe_wrapper import safe_cuda_empty_cache, safe_cuda_synchronize
+except ImportError:
+    # Fallback if wrapper not available
+    def safe_cuda_empty_cache():
+        try:
+            if torch.cuda.is_available():
+                safe_cuda_empty_cache()
+        except:
+            pass
+    
+    def safe_cuda_synchronize():
+        try:
+            if torch.cuda.is_available():
+                safe_cuda_synchronize()
+        except:
+            pass
 import glob
 import tempfile
 import uuid
@@ -137,18 +156,11 @@ def print_gpu_detection():
             # Update hw_settings to reflect actual GPU availability
             hw_settings['device'] = 'cuda'
             
-            # Force reload hardware settings to get GPU-optimized parameters
-            try:
-                hardware_optimizer = get_hardware_optimizer()
-                gpu_settings = hardware_optimizer.get_optimized_settings()
-                if gpu_settings['device'] == 'cuda':
-                    hw_settings.update(gpu_settings)
-                    print(f"9. Loaded GPU-optimized settings:")
-                    print(f"   - Batch size: {hw_settings['batch_size']}")
-                    print(f"   - Workers: {hw_settings['max_workers']}")
-                    print(f"   - Mixed precision: {hw_settings.get('use_mixed_precision', False)}")
-            except Exception as e:
-                print(f"9. Failed to load GPU settings: {e}")
+            # Update settings for GPU
+            print(f"9. Using GPU-optimized settings:")
+            print(f"   - Batch size: {hw_settings['batch_size']}")
+            print(f"   - Workers: {hw_settings['max_workers']}")
+            print(f"   - Mixed precision: {hw_settings.get('use_mixed_precision', False)}")
         else:
             print("\nWarning: GPU detected but not functional, falling back to CPU")
             hw_settings['device'] = 'cpu'
@@ -252,7 +264,7 @@ def monitor_memory_usage(session_id):
             # Force garbage collection before stopping
             gc.collect()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                safe_cuda_empty_cache()
             return False
         elif memory.percent > 85:  # Warning at 85%
             print(f"[{session_id}] WARNING: Memory usage at {memory.percent:.1f}%")
@@ -279,7 +291,7 @@ def force_memory_cleanup():
     try:
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            safe_cuda_empty_cache()
         # Additional cleanup for PyTorch tensors
         import torch
         if hasattr(torch, '_C') and hasattr(torch._C, '_cuda_emptyCache'):
@@ -300,7 +312,7 @@ def unload_models_from_gpu():
         
         # Clear GPU cache
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            safe_cuda_empty_cache()
             debug_log("[MEMORY] Cleared GPU cache", "system")
         
         # Note: models_loaded stays True as models are still in memory, just on CPU
@@ -341,7 +353,7 @@ def cleanup_on_exit():
         # Force garbage collection
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            safe_cuda_empty_cache()
         
         print("Cleanup completed")
     except Exception as e:
@@ -495,7 +507,7 @@ def load_models_if_needed():
             # Clear memory before loading
             gc.collect()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                safe_cuda_empty_cache()
             
             print("Attempting to load from HuggingFace...")
             birefnet_lite = AutoModelForImageSegmentation.from_pretrained(
@@ -824,7 +836,7 @@ def process_image(image, bg, fast_mode=False, transparent=False):
     debug_log("[AI] Freeing GPU/CPU memory...", "ai_process")
     del input_images, preds, pred
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        safe_cuda_empty_cache()
     
     # If transparent background requested, return RGBA image with transparency
     if transparent:
@@ -939,7 +951,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
     # Force garbage collection before starting
     gc.collect()
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        safe_cuda_empty_cache()
     debug_log(f"✅ Memory cleanup complete", session_id)
     
     try:
@@ -1261,7 +1273,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                     if (i + 1) % 5 == 0:
                         gc.collect()
                         if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
+                            safe_cuda_empty_cache()
                             # Also check memory usage
                             if not monitor_memory_usage(session_id):
                                 debug_log(f"[{session_id}] CRITICAL: Memory too high, stopping processing", session_id)
@@ -1273,7 +1285,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
                     # Clean up GPU memory on error
                     gc.collect()
                     if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                        safe_cuda_empty_cache()
                     # Use original frame as fallback and save to disk
                     fallback_frame = frames[i] if i < len(frames) else frames[0]
                     frame_filename = os.path.join(frames_dir, f"frame_{i+1:04d}.npy")
@@ -1287,7 +1299,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         # Force cleanup after processing all frames
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            safe_cuda_empty_cache()
         
         if session_id not in active_sessions:
             print(f"[{session_id}] Processing cancelled before video creation")
@@ -1296,7 +1308,7 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         # Clear memory before final video creation
         gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            safe_cuda_empty_cache()
         
         # Create final video - load frames from disk as needed
         debug_log(f"[{session_id}] Creating final video with {len(processed_frame_paths)} processed frames", session_id)
@@ -1935,8 +1947,8 @@ def process_video_async(session_id, video_path, bg_type, bg_path, color, fps, vi
         gc.collect()  # Run twice for thorough cleanup
         
         if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()  # Wait for GPU to finish
+            safe_cuda_empty_cache()
+            safe_cuda_synchronize()  # Wait for GPU to finish
             debug_log(f"[{session_id}] GPU memory FULLY cleared", session_id)
         
         debug_log(f"[{session_id}] CLEANUP COMPLETE - All resources freed", session_id)
@@ -2210,8 +2222,8 @@ def cancel_processing():
     gc.collect()  # Run twice
     
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        safe_cuda_empty_cache()
+        safe_cuda_synchronize()
         print(f"[CANCEL] GPU memory FULLY cleared")
     
     # Send cancellation event to client
@@ -2375,8 +2387,8 @@ def cleanup_session():
     gc.collect()
     gc.collect()  # Run twice for thorough cleanup
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        safe_cuda_empty_cache()
+        safe_cuda_synchronize()
         debug_log(f"[CLEANUP] GPU memory cleared", session_id)
     
     debug_log(f"[CLEANUP] AGGRESSIVE cleanup complete - frames: {frames_cleaned}, files: {files_cleaned}", session_id)
@@ -2801,7 +2813,8 @@ def handle_connect():
     debug_log(f'Ready to process videos!', 'system')
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(*args, **kwargs):
+    # Accept any arguments that Flask-SocketIO might pass
     client_id = request.sid
     debug_log(f'\n=== CLIENT DISCONNECTED: {client_id} ===', 'system')
     
@@ -2839,7 +2852,7 @@ def handle_disconnect():
     # Force memory cleanup after disconnect
     gc.collect()
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        safe_cuda_empty_cache()
 
 import atexit
 import signal
