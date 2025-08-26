@@ -154,7 +154,8 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
     let connectionAttempts = 0;
     const startTime = Date.now();
-    const GRACE_PERIOD = 4000; // 4 seconds grace period for backend to start
+    const GRACE_PERIOD = 10000; // 10 seconds grace period for backend to start (backend can be slow to boot)
+    let hasShownWaiting = false; // prevent duplicate waiting messages
     
     const initSocket = () => {
       // Create socket with polling-only transport to avoid WebSocket issues
@@ -189,8 +190,9 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         connectionAttempts++;
         const elapsedTime = Date.now() - startTime;
         
-        // Only show error after grace period OR after multiple attempts
-        if (elapsedTime > GRACE_PERIOD && connectionAttempts > 2) {
+        // Only show after grace period OR after multiple attempts, and only once
+        if (!hasShownWaiting && (elapsedTime > GRACE_PERIOD || connectionAttempts > 3)) {
+          hasShownWaiting = true;
           setState(prev => ({ 
             ...prev, 
             connectionError: 'Waiting for Python server to start...' 
