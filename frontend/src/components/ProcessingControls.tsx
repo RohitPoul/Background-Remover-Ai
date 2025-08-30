@@ -66,8 +66,6 @@ export default function ProcessingControls() {
             size="large"
             startIcon={<DownloadIcon />}
             onClick={() => {
-              console.log('📥 [FRONTEND] Download Button Clicked');
-              console.log(`  - Output file available: ${outputFile ? 'Yes' : 'No'}`);
               downloadVideo();
             }}
             data-debug-label="download-video"
@@ -92,8 +90,6 @@ export default function ProcessingControls() {
             size="large"
             startIcon={<StopIcon />}
             onClick={() => {
-              console.log('⛔ [FRONTEND] Cancel Processing Button Clicked');
-              console.log(`  - Current status: ${processingStatus}`);
               cancelProcessing();
             }}
             data-debug-label="cancel-processing"
@@ -116,15 +112,6 @@ export default function ProcessingControls() {
             size="large"
             startIcon={<PlayIcon />}
             onClick={() => {
-              console.log('🎬 [FRONTEND] START PROCESSING BUTTON CLICKED');
-              console.log('  === CURRENT SETTINGS ===');
-              console.log(`  - Background Type: '${backgroundType}'`);
-              console.log(`  - Output Format: '${outputFormat}'`);
-              console.log(`  - Fast Mode: ${fastMode}`);
-              console.log(`  - FPS: ${fps === 0 ? 'Original' : fps}`);
-              console.log(`  - Max Workers: ${maxWorkers}`);
-              console.log(`  - Uploaded Video: ${uploadedVideo?.name || 'None'}`);
-              console.log('  ======================');
               startProcessing();
             }}
             disabled={!uploadedVideo || isProcessing}
@@ -170,9 +157,6 @@ export default function ProcessingControls() {
             <Switch
               checked={fastMode}
               onChange={(e) => {
-                console.log('⚡ [FRONTEND] Fast Mode Toggle');
-                console.log(`  - New value: ${e.target.checked}`);
-                console.log(`  - Previous: ${fastMode}`);
                 setFastMode(e.target.checked);
               }}
               disabled={isProcessing}
@@ -217,8 +201,6 @@ export default function ProcessingControls() {
         startIcon={<TuneIcon />}
         endIcon={showAdvanced ? <ExpandLessIcon /> : <ExpandMoreIcon />}
         onClick={() => {
-          console.log('🔧 [FRONTEND] Advanced Settings Toggle');
-          console.log(`  - New state: ${!showAdvanced ? 'Open' : 'Closed'}`);
           setShowAdvanced(!showAdvanced);
         }}
         disabled={isProcessing}
@@ -266,9 +248,6 @@ export default function ProcessingControls() {
               <Slider
                 value={fps}
                 onChange={(_, value) => {
-                  console.log('🎥 [FRONTEND] FPS Slider Changed');
-                  console.log(`  - New FPS: ${value === 0 ? 'Original' : value}`);
-                  console.log(`  - Previous: ${fps === 0 ? 'Original' : fps}`);
                   setFps(value as number);
                 }}
                 disabled={isProcessing}
@@ -324,19 +303,12 @@ export default function ProcessingControls() {
               exclusive
               onChange={(_, value) => {
                 if (value) {
-                  console.log('📼 [FRONTEND] OUTPUT FORMAT CHANGED');
-                  console.log(`  - Selected: '${value}'`);
-                  console.log(`  - Previous: '${outputFormat}'`);
-                  console.log(`  - Background Type: '${backgroundType}'`);
                   
                   // Auto-switch from MP4 if transparent is selected
                   if (backgroundType === 'Transparent' && value === 'mp4') {
-                    console.log('  ⚠️ Cannot use MP4 with Transparent background!');
-                    console.log('  ✅ Auto-switching to MOV instead');
                     setOutputFormat('mov');
                   } else {
                     setOutputFormat(value);
-                    console.log(`  ✅ Output format set to: '${value}'`);
                   }
                 }
               }}
@@ -408,9 +380,6 @@ export default function ProcessingControls() {
               <Slider
                 value={maxWorkers}
                 onChange={(_, value) => {
-                  console.log('⚙️ [FRONTEND] Max Workers Changed');
-                  console.log(`  - New value: ${value}`);
-                  console.log(`  - Previous: ${maxWorkers}`);
                   setMaxWorkers(value as number);
                 }}
                 disabled={isProcessing}
