@@ -45,15 +45,12 @@ export default function DualVideoPreview() {
   
   // For MOV files, use WebM preview for video player but keep MOV for download
   const getPreviewUrl = (originalUrl: string, format: string): string => {
-    console.log(`🎥 [DualVideoPreview] getPreviewUrl called - format: ${format}, originalUrl: ${originalUrl}`);
     if (format === 'mov' && originalUrl) {
       // Replace the file extension/name to get preview file
       // Convert: /temp_output_123.mov or /temp_output_123_transparent.mov
       // To: /temp_output_123_preview.webm
       const previewUrl = originalUrl.replace(/\/temp_output_([^/]+)\.mov$/, '/temp_output_$1_preview.webm')
                                    .replace(/\/temp_output_([^/]+)_transparent\.mov$/, '/temp_output_$1_preview.webm');
-      console.log('🎬 [DualVideoPreview] Using WebM preview for MOV:', previewUrl);
-      console.log('🎬 [DualVideoPreview] Original MOV URL:', originalUrl);
       return previewUrl;
     }
     return originalUrl;
@@ -64,16 +61,11 @@ export default function DualVideoPreview() {
   // Convert processed video to blob URL to avoid CSP issues
   useEffect(() => {
     if (previewUrl && processingStatus === 'completed') {
-      console.log('🎬 Fetching processed video as blob:', previewUrl);
-      console.log('📦 Output format:', outputFormat);
-      console.log('🎨 Background type:', backgroundType);
-      console.log('💾 Original download URL:', processedUrl);
       
       // Fetch the video as blob and create a blob URL
       fetch(previewUrl)
         .then(response => {
           if (!response.ok) {
-            console.warn(`⚠️ Preview file not found (${response.status}), falling back to original`);
             // If preview file doesn't exist, fall back to original file
             return fetch(processedUrl).then(r => {
               if (!r.ok) throw new Error(`Failed to fetch original: ${r.status}`);
@@ -84,12 +76,9 @@ export default function DualVideoPreview() {
         })
         .then(blob => {
           const blobUrl = URL.createObjectURL(blob);
-          console.log('✅ Blob URL created for preview:', blobUrl);
-          console.log('📏 Blob size:', blob.size, 'bytes');
           setProcessedBlobUrl(blobUrl);
         })
         .catch(error => {
-          console.error('❌ Failed to create blob URL:', error);
         });
     }
     
@@ -219,12 +208,8 @@ export default function DualVideoPreview() {
                         left: 0
                       }}
                       onLoadedData={() => {
-                        console.log('✅ Processed video loaded successfully');
                       }}
                       onError={(e) => {
-                        console.error('❌ Video playback error:', e);
-                        console.log('Blob URL:', processedBlobUrl);
-                        console.log('Output format:', outputFormat);
                       }}
                     />
                   </Box>
