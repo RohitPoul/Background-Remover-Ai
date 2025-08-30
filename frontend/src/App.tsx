@@ -1,12 +1,10 @@
 import React from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { Box, Fab, Tooltip } from '@mui/material';
-import { BugReport as BugIcon } from '@mui/icons-material';
+import { Box } from '@mui/material';
 import VideoProcessor from './components/VideoProcessor';
 import Header from './components/Header';
-import DebugPanel from './components/DebugPanel';
-import { VideoProcessorProvider, useVideoProcessor } from './context/VideoProcessorContext';
+import { VideoProcessorProvider } from './context/VideoProcessorContext';
 import './App.css';
 
 const darkTheme = createTheme({
@@ -94,8 +92,6 @@ const darkTheme = createTheme({
 
 // App content with access to context
 const AppContent = () => {
-  const { toggleDebugPanel, showDebugPanel } = useVideoProcessor();
-  
   return (
     <Box
       sx={{
@@ -124,23 +120,6 @@ const AppContent = () => {
       
       <Header />
       <VideoProcessor />
-      
-      {/* Debug Panel */}
-      <DebugPanel />
-      
-      {/* Debug Toggle Button (only show when debug panel is hidden) */}
-      {!showDebugPanel && (
-        <Tooltip title="Show Debug Console">
-          <Fab 
-            size="small" 
-            color="primary" 
-            onClick={toggleDebugPanel}
-            sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 9999 }}
-          >
-            <BugIcon />
-          </Fab>
-        </Tooltip>
-      )}
     </Box>
   );
 };
