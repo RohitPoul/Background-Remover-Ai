@@ -2,12 +2,6 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { io, Socket } from 'socket.io-client';
 
 // Types
-interface DebugLogEntry {
-  message: string;
-  timestamp: number;
-  sessionId: string;
-}
-
 interface VideoProcessorState {
   // Upload state
   uploadedVideo: File | null;
@@ -25,8 +19,6 @@ interface VideoProcessorState {
   outputFile: string | null;
   statusMessage: string | null;
   debugInfo?: any; // Debug information from backend
-  debugLogs: DebugLogEntry[]; // Debug logs from backend
-  showDebugPanel: boolean; // Whether to show debug panel
   
   // Connection state
   connectionError: string | null;
@@ -70,8 +62,6 @@ interface VideoProcessorContextType extends VideoProcessorState {
   downloadVideo: () => void;
 
   resetState: () => void;
-  toggleDebugPanel: () => void; // Toggle debug panel
-  clearDebugLogs: () => void; // Clear debug logs
 }
 
 // Context
@@ -106,9 +96,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     fps: 0,
     fastMode: true,
     maxWorkers: 2,
-    outputFormat: 'mp4',
-    debugLogs: [],
-    showDebugPanel: true, // Show debug panel by default
+    outputFormat: 'mp4'
   });
 
   // Socket connection - store as ref to prevent re-creation
@@ -174,16 +162,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         connectionAttempts = 0;
         setState(prev => ({ 
           ...prev, 
-          connectionError: null,
-          debugLogs: [
-            ...prev.debugLogs,
-            {
-              message: '✅ Connected to Python backend server',
-              timestamp: Date.now() / 1000,
-              sessionId: 'frontend'
-            }
-          ].slice(-50) // MEMORY FIX: Limit debug logs
-        }));
+          connectionError: null}));
       });
 
       newSocket.on('connect_error', (err) => {
@@ -273,24 +252,10 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         }));
       });
       
-      // Debug logs from backend
-      newSocket.on('debug_log', (data) => {
-        setState(prev => ({
-          ...prev,
-          debugLogs: [
-            ...prev.debugLogs,
-            {
-              message: data.message,
-              timestamp: data.timestamp || Date.now() / 1000,
-              sessionId: data.session_id || 'unknown'
-            }
-          ].slice(-50) // MEMORY FIX: Keep only last 50 logs to prevent memory accumulation
-        }));
-      });
+      // Debug logs disabled for production
       
       // System warnings (memory, GPU, etc.)
       newSocket.on('system_warning', (data) => {
-        console.log('System warning received:', data);
         setState(prev => ({
           ...prev,
           systemWarning: {
@@ -397,17 +362,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     if (!state.uploadedVideo) return;
 
     // Add debug message
-    setState(prev => ({
-      ...prev,
-      debugLogs: [
-        ...prev.debugLogs,
-        {
-          message: `📹 Starting video processing - File: ${state.uploadedVideo?.name || 'Unknown'}, Format: ${state.outputFormat}, Background: ${state.backgroundType}`,
-          timestamp: Date.now() / 1000,
-          sessionId: 'frontend'
-        }
-      ].slice(-50) // MEMORY FIX: Limit debug logs
-    }));
+    // Debug logging removed
 
     try {
       // Validate inputs
@@ -502,47 +457,15 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
         elapsedTime: 0,
         previewImage: null,
         processedFrames: [],
-        selectedFrameIndex: 0,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: '🛑 Cancel request sent to backend (frames cleaned up)',
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ].slice(-50) // MEMORY FIX: Limit debug logs
-      }));
+        selectedFrameIndex: 0}));
     } catch (error) {
       // Cancellation error
     }
   }, [state.sessionId]);
 
   const downloadVideo = useCallback(async () => {
-    // Add debug message
-    setState(prev => ({
-      ...prev,
-      debugLogs: [
-        ...prev.debugLogs,
-        {
-          message: `🔽 [DOWNLOAD] Standard download button clicked`,
-          timestamp: Date.now() / 1000,
-          sessionId: 'frontend'
-        }
-      ].slice(-500)
-    }));
-    
     if (!state.outputFile) {
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `❌ [DOWNLOAD] ERROR: No output file available`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
+      alert('No output file available');
       return;
     }
     
@@ -550,83 +473,18 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
       const fullUrl = `${API_BASE}${state.outputFile}`;
       
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `[DOWNLOAD] Output file: ${state.outputFile}`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          },
-          {
-            message: `[DOWNLOAD] Full URL: ${fullUrl}`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          },
-          {
-            message: `[DOWNLOAD] Fetching file from server...`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
-
       const response = await fetch(fullUrl, { mode: 'cors' });
       
       if (!response.ok) {
-        const errorText = await response.text();
-        setState(prev => ({
-          ...prev,
-          debugLogs: [
-            ...prev.debugLogs,
-            {
-              message: `❌ [DOWNLOAD] Fetch failed - Status: ${response.status}`,
-              timestamp: Date.now() / 1000,
-              sessionId: 'frontend'
-            },
-            {
-              message: `❌ [DOWNLOAD] Error: ${errorText}`,
-              timestamp: Date.now() / 1000,
-              sessionId: 'frontend'
-            }
-          ].slice(-500)
-        }));
         throw new Error(`Download failed: ${response.status}`);
       }
       
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `✅ [DOWNLOAD] Fetch successful, converting to blob...`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
-      
       const blob = await response.blob();
-      const blobSizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-      
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `[DOWNLOAD] Blob created - Size: ${blob.size} bytes (${blobSizeMB} MB)`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
-      
       const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
       
-      // Derive extension from actual output file path to avoid mismatches if backend falls back
+      // Derive extension from actual output file path
       const lastSlash = state.outputFile.lastIndexOf('/');
       const fileSegment = lastSlash >= 0 ? state.outputFile.slice(lastSlash + 1) : state.outputFile;
       const dotIndex = fileSegment.lastIndexOf('.');
@@ -635,50 +493,16 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       const filename = `processed_video_${Date.now()}.${ext}`;
       link.download = filename;
       
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `[DOWNLOAD] Triggering download - Filename: ${filename}`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
-      
       // Trigger download
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
       
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `✅ [DOWNLOAD] Download triggered successfully!`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ]
-      }));
     } catch (e: any) {
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `❌ [DOWNLOAD] Error: ${e?.message || 'Unknown error'}`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ].slice(-500)
-      }));
-      alert(`Download failed: ${e?.message || 'Unknown error'}. Check debug console for details.`);
+      alert(`Download failed: ${e?.message || 'Unknown error'}`);
     }
-  }, [state.outputFile, state.outputFormat, state.debugInfo]);
+  }, [state.outputFile, state.outputFormat]);
 
   const resetState = useCallback(async () => {
     // AGGRESSIVE CLEANUP - Clean up session if exists
@@ -691,9 +515,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionToClean }),
         });
-        console.log('✅ AGGRESSIVE cleanup for session:', sessionToClean);
       } catch (error) {
-        console.error('Error cleaning up session:', error);
       }
     }
     
@@ -718,30 +540,10 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
 
   // Direct download method that gets raw video data
   const downloadVideoDirectly = useCallback(async () => {
-    setState(prev => ({
-      ...prev,
-      debugLogs: [
-        ...prev.debugLogs,
-        {
-          message: `💾 [DIRECT DOWNLOAD] Direct download button clicked`,
-          timestamp: Date.now() / 1000,
-          sessionId: 'frontend'
-        }
-      ].slice(-500)
-    }));
+    // Debug logging removed
     
     if (!state.outputFile) {
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `❌ [DIRECT DOWNLOAD] ERROR: No output file available`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ].slice(-500)
-      }));
+      // Debug logging removed
       return;
     }
     
@@ -750,17 +552,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
       const lastSlash = state.outputFile.lastIndexOf('/');
       const filename = lastSlash >= 0 ? state.outputFile.slice(lastSlash + 1) : state.outputFile;
       
-      setState(prev => ({
-        ...prev,
-        debugLogs: [
-          ...prev.debugLogs,
-          {
-            message: `[DIRECT DOWNLOAD] Extracted filename: ${filename}`,
-            timestamp: Date.now() / 1000,
-            sessionId: 'frontend'
-          }
-        ].slice(-500)
-      }));
+      // Debug logging removed
       
       const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
       const dataUrl = `${API_BASE}/api/get_video_data/${filename}`;
@@ -790,21 +582,7 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     }
   }, [state.outputFile, state.outputFormat]);
 
-  // Toggle debug panel
-  const toggleDebugPanel = useCallback(() => {
-    setState(prev => ({
-      ...prev,
-      showDebugPanel: !prev.showDebugPanel
-    }));
-  }, []);
-  
-  // Clear debug logs
-  const clearDebugLogs = useCallback(() => {
-    setState(prev => ({
-      ...prev,
-      debugLogs: []
-    }));
-  }, []);
+  // Debug functions removed for production
 
   // Create context value
   const value: VideoProcessorContextType = {
@@ -825,8 +603,6 @@ export function VideoProcessorProvider({ children }: { children: ReactNode }) {
     downloadVideo,
 
     resetState,
-    toggleDebugPanel,
-    clearDebugLogs,
   };
 
   return (
