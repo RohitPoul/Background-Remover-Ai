@@ -84,17 +84,11 @@ export default function BackgroundSettings() {
   const handleBackgroundFileUpload = (event: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'video') => {
     const file = event.target.files?.[0];
     if (file) {
-      console.log(`📁 [FRONTEND] Background ${type.toUpperCase()} Upload`);
-      console.log(`  - File name: ${file.name}`);
-      console.log(`  - File size: ${(file.size / 1024 / 1024).toFixed(2)} MB`);
-      console.log(`  - File type: ${file.type}`);
       
       if (type === 'image') {
         setBackgroundImage(file);
-        console.log('  ✅ Background image set');
       } else {
         setBackgroundVideo(file);
-        console.log('  ✅ Background video set');
       }
     }
   };
@@ -121,20 +115,14 @@ export default function BackgroundSettings() {
             <Paper
               onClick={() => {
                 if (!isProcessing) {
-                  console.log('🎯 [FRONTEND] Background Type Button Clicked');
-                  console.log(`  - Selected: '${option.value}'`);
-                  console.log(`  - Previous: '${backgroundType}'`);
-                  console.log(`  - Current output format: '${outputFormat}'`);
                   
                   setBackgroundType(option.value as any);
                   
                   // Auto-switch from MP4 to MOV when selecting transparent
                   if (option.value === 'Transparent' && outputFormat === 'mp4') {
-                    console.log('  ⚠️ Auto-switching from MP4 to MOV (MP4 does not support transparency)');
                     setOutputFormat('mov');
                   }
                   
-                  console.log(`  ✅ Background type set to: '${option.value}'`);
                 }
               }}
               sx={{
@@ -234,9 +222,6 @@ export default function BackgroundSettings() {
               <Tooltip key={preset.color} title={preset.label}>
                 <Paper
                   onClick={() => {
-                    console.log('🎨 [FRONTEND] Color Preset Selected');
-                    console.log(`  - Color: ${preset.color} (${preset.label})`);
-                    console.log(`  - Previous color: ${backgroundColor}`);
                     setBackgroundColor(preset.color);
                   }}
                   sx={{
@@ -265,9 +250,6 @@ export default function BackgroundSettings() {
             label="Custom Color"
             value={backgroundColor}
             onChange={(e) => {
-              console.log('🎨 [FRONTEND] Custom Color Changed');
-              console.log(`  - New color: ${e.target.value}`);
-              console.log(`  - Previous color: ${backgroundColor}`);
               setBackgroundColor(e.target.value);
             }}
             variant="outlined"
@@ -323,8 +305,6 @@ export default function BackgroundSettings() {
                     variant="outlined"
                     size="small"
                     onClick={() => {
-                      console.log('🗑️ [FRONTEND] Background Image Removed');
-                      console.log(`  - Removed: ${backgroundImage?.name}`);
                       setBackgroundImage(null);
                     }}
                     sx={{
@@ -413,8 +393,6 @@ export default function BackgroundSettings() {
                     variant="outlined"
                     size="small"
                     onClick={() => {
-                      console.log('🗑️ [FRONTEND] Background Video Removed');
-                      console.log(`  - Removed: ${backgroundVideo?.name}`);
                       setBackgroundVideo(null);
                     }}
                     sx={{
@@ -499,9 +477,6 @@ export default function BackgroundSettings() {
                 exclusive
                 onChange={(_, value) => {
                   if (value) {
-                    console.log('🎬 [FRONTEND] Video Sync Mode Changed');
-                    console.log(`  - Mode: ${value}`);
-                    console.log(`  - Previous: ${videoHandling}`);
                     setVideoHandling(value);
                   }
                 }}
