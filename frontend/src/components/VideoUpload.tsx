@@ -58,36 +58,38 @@ export default function VideoUpload() {
     disabled: isUploading,
   });
 
-  const handleRemoveVideo = async () => {
-    // AGGRESSIVE CLEANUP when video is removed
-    const sessionId = (window as any).currentSessionId;
-    
-    // Cancel any active processing first
-    if (cancelProcessing) {
-      await cancelProcessing();
-    }
-    
-    // Then clean up ALL resources for this session
-    if (sessionId) {
-      try {
-        const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
-        await fetch(`${API_BASE}/api/cleanup_session`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId }),
-        });
-        console.log('✅ AGGRESSIVE cleanup completed for session:', sessionId);
-      } catch (error) {
-        console.error('Error cleaning up session:', error);
-      }
-    }
-    
-    // Clear global session tracking
-    (window as any).currentSessionId = null;
-    
-    // Reset UI state
+  const handleRemoveVideo = () => {
+    // IMMEDIATELY reset UI for instant response
     setUploadedVideo(null);
     setUploadProgress(0);
+    
+    // Then do cleanup in the background (non-blocking)
+    const sessionId = (window as any).currentSessionId;
+    
+    // Background cleanup - don't await, let it run async
+    setTimeout(async () => {
+      // Cancel any active processing
+      if (cancelProcessing) {
+        await cancelProcessing();
+      }
+      
+      // Clean up ALL resources for this session
+      if (sessionId) {
+        try {
+          const API_BASE = (process.env.REACT_APP_API_BASE || 'http://localhost:5000').replace(/\/$/, '');
+          await fetch(`${API_BASE}/api/cleanup_session`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId }),
+          });
+        } catch (error) {
+          // Cleanup error silently ignored
+        }
+      }
+      
+      // Clear global session tracking
+      (window as any).currentSessionId = null;
+    }, 0); // Run immediately but non-blocking
   };
 
   const formatFileSize = (bytes: number) => {
