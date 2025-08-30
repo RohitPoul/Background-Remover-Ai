@@ -14,8 +14,18 @@ interface HardwareInfo {
   processing_device: string;
   gpu_name: string;
   gpu_available: boolean;
+  gpu_vram?: {
+    vram_total_gb: number;
+    vram_allocated_gb: number;
+    vram_reserved_gb: number;
+    vram_free_gb: number;
+    vram_usage_percent: number;
+  };
+  gpu_utilization?: number;
+  gpu_temperature?: number;
   cpu_cores: number;
   cpu_threads: number;
+  cpu_usage_percent?: number;
   memory_gb: number;
   memory_available_gb: number;
   memory_usage_percent: number;
@@ -38,6 +48,7 @@ export default function HardwareStatus() {
   const [retryCount, setRetryCount] = useState(0);
   const [isInitializing, setIsInitializing] = useState(true);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [updateCounter, setUpdateCounter] = useState(0);
 
   // First, check if backend is available
   useEffect(() => {
@@ -55,12 +66,12 @@ export default function HardwareStatus() {
       }
     };
 
-    // Check backend connection every second until connected
+    // Check backend connection every 3 seconds until connected
     const connectionInterval = setInterval(() => {
       if (!backendConnected) {
         checkBackendConnection();
       }
-    }, 1000);
+    }, 3000);
 
     // Initial check
     checkBackendConnection();
@@ -91,10 +102,13 @@ export default function HardwareStatus() {
       }
     }, 2000);
     
-    // Refresh every 30 seconds once connected
+    // Refresh every 2 seconds for real-time monitoring
     const refreshInterval = setInterval(() => {
-      if (!error) fetchHardwareStatus();
-    }, 30000);
+      if (!error) {
+        fetchHardwareStatus();
+        setUpdateCounter(prev => prev + 1);
+      }
+    }, 2000);
     
     return () => {
       clearInterval(retryInterval);
@@ -174,7 +188,8 @@ export default function HardwareStatus() {
   const isGPU = hardware.processing_device === 'CUDA' || hardware.processing_device === 'MPS';
   const deviceColor = isGPU ? 'success' : 'warning';
   const deviceIcon = isGPU ? <GpuIcon /> : <CpuIcon />;
-  const speedLevel = settings?.optimization_profile || (isGPU ? 'high' : 'medium'); // Use actual profile or estimate
+  const speedLevel = settings?.optimization_profile || 'detecting';
+  const profileName = speedLevel === 'unknown' ? 'Custom' : speedLevel;
   
   // Determine performance level
   const getPerformanceColor = () => {
@@ -187,99 +202,223 @@ export default function HardwareStatus() {
       case 'low':
       case 'potato':
         return 'warning';
+      case 'unknown':
+      case 'detecting':
+      case 'custom':
+        return 'default';
       default:
         return 'default';
     }
+  };
+  
+  const getUtilizationColor = (percent: number) => {
+    if (percent > 90) return 'error.main';
+    if (percent > 70) return 'warning.main';
+    return 'success.main';
   };
 
   return (
     <Box sx={{ 
       display: 'flex', 
-      alignItems: 'center', 
-      gap: 2, 
+      flexDirection: 'column',
+      gap: 1.5,
       p: 1.5,
       bgcolor: 'rgba(0,0,0,0.2)',
       borderRadius: 1,
       border: '1px solid rgba(255,255,255,0.1)'
     }}>
-      {/* Processing Device */}
-      <Tooltip title={
-        <Box>
-          <Typography variant="body2">
-            {isGPU ? `GPU: ${hardware.gpu_name}` : `CPU: ${hardware.cpu_cores} cores, ${hardware.cpu_threads} threads`}
-          </Typography>
-          <Typography variant="caption">
-            Memory: {hardware.memory_available_gb.toFixed(1)} / {hardware.memory_gb.toFixed(1)} GB available
-          </Typography>
-        </Box>
-      }>
-        <Chip
-          icon={deviceIcon}
-          label={isGPU ? 'GPU' : 'CPU'}
-          color={deviceColor}
-          size="small"
-          sx={{ fontWeight: 600 }}
-        />
-      </Tooltip>
-
-      {/* Performance Profile */}
-      <Tooltip title={
-        <Box>
-          <Typography variant="body2">Optimization Profile: {speedLevel}</Typography>
-          <Typography variant="caption">
-            • Batch Size: {settings?.batch_size || 1}<br />
-            • Workers: {settings?.max_workers || 1}<br />
-            • Mixed Precision: {settings?.mixed_precision ? 'Yes' : 'No'}<br />
-            • Quantization: {settings?.model_quantization ? 'Yes' : 'No'}
-          </Typography>
-        </Box>
-      }>
-        <Chip
-          icon={<SpeedIcon />}
-          label={speedLevel.toUpperCase()}
-          color={getPerformanceColor()}
-          size="small"
-          variant="outlined"
-        />
-      </Tooltip>
-
-      {/* Memory Usage */}
-      <Tooltip title={`Memory Usage: ${hardware.memory_usage_percent.toFixed(1)}%`}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            RAM:
-          </Typography>
-          <Box sx={{ 
-            width: 60, 
-            height: 6, 
-            bgcolor: 'rgba(255,255,255,0.1)', 
-            borderRadius: 3,
-            overflow: 'hidden'
-          }}>
-            <Box sx={{ 
-              width: `${hardware.memory_usage_percent}%`,
-              height: '100%',
-              bgcolor: hardware.memory_usage_percent > 80 ? 'error.main' : 
-                      hardware.memory_usage_percent > 60 ? 'warning.main' : 'success.main',
-              transition: 'width 0.3s ease'
-            }} />
+      {/* Top row - Device and Profile */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {/* Processing Device */}
+        <Tooltip title={
+          <Box>
+            <Typography variant="body2">
+              {isGPU ? `GPU: ${hardware.gpu_name}` : `CPU: ${hardware.cpu_cores} cores, ${hardware.cpu_threads} threads`}
+            </Typography>
+            {isGPU && hardware.gpu_temperature ? (
+              <Typography variant="caption">
+                Temperature: {hardware.gpu_temperature}°C
+              </Typography>
+            ) : null}
           </Box>
-          <Typography variant="caption" sx={{ color: 'text.secondary', minWidth: 35 }}>
-            {hardware.memory_usage_percent.toFixed(0)}%
-          </Typography>
-        </Box>
-      </Tooltip>
+        }>
+          <Chip
+            icon={deviceIcon}
+            label={isGPU ? 'GPU' : 'CPU'}
+            color={deviceColor}
+            size="small"
+            sx={{ fontWeight: 600 }}
+          />
+        </Tooltip>
 
-      {/* Status Indicator */}
-      <Tooltip title={isGPU ? 
-        `GPU Accelerated (${hardware.gpu_name})` : 
-        'CPU Processing (Install CUDA for GPU acceleration)'
-      }>
-        <CheckIcon sx={{ 
-          fontSize: 16, 
-          color: isGPU ? 'success.main' : 'info.main'
-        }} />
-      </Tooltip>
+        {/* Performance Profile */}
+        <Tooltip title={
+          <Box>
+            <Typography variant="body2">Optimization Profile: {profileName}</Typography>
+            <Typography variant="caption">
+              • Batch Size: {settings?.batch_size || 1}<br />
+              • Workers: {settings?.max_workers || 1}<br />
+              • Mixed Precision: {settings?.mixed_precision ? 'Yes' : 'No'}<br />
+              • Quantization: {settings?.model_quantization ? 'Yes' : 'No'}
+            </Typography>
+          </Box>
+        }>
+          <Chip
+            icon={<SpeedIcon />}
+            label={profileName.toUpperCase()}
+            color={getPerformanceColor()}
+            size="small"
+            variant="outlined"
+          />
+        </Tooltip>
+
+        {/* Status Indicator */}
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title={isGPU ? 
+          `GPU Accelerated (${hardware.gpu_name})` : 
+          'CPU Processing (Install CUDA for GPU acceleration)'
+        }>
+          <CheckIcon sx={{ 
+            fontSize: 16, 
+            color: isGPU ? 'success.main' : 'info.main'
+          }} />
+        </Tooltip>
+      </Box>
+
+      {/* Performance Metrics Row */}
+      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+        {/* GPU Usage (if GPU available) */}
+        {isGPU && (
+          <>
+            {/* GPU Core Utilization */}
+            {hardware.gpu_utilization !== undefined && hardware.gpu_utilization !== 0 && (
+              <Tooltip title={`GPU Core Utilization: ${hardware.gpu_utilization}%`}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 110 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                    GPU:
+                  </Typography>
+                  <Box sx={{ 
+                    flex: 1,
+                    height: 6, 
+                    bgcolor: 'rgba(255,255,255,0.1)', 
+                    borderRadius: 3,
+                    overflow: 'hidden'
+                  }}>
+                    <Box sx={{ 
+                      width: `${hardware.gpu_utilization}%`,
+                      height: '100%',
+                      bgcolor: getUtilizationColor(hardware.gpu_utilization),
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </Box>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', minWidth: 35, fontSize: '0.7rem' }}>
+                    {hardware.gpu_utilization.toFixed(0)}%
+                  </Typography>
+                </Box>
+              </Tooltip>
+            )}
+
+            {/* VRAM Usage */}
+            {hardware.gpu_vram && (
+              <Tooltip title={
+                <Box>
+                  <Typography variant="body2">Video Memory</Typography>
+                  <Typography variant="caption">
+                    Used: {hardware.gpu_vram.vram_allocated_gb.toFixed(1)} GB<br />
+                    Total: {hardware.gpu_vram.vram_total_gb.toFixed(1)} GB<br />
+                    Free: {hardware.gpu_vram.vram_free_gb.toFixed(1)} GB
+                  </Typography>
+                </Box>
+              }>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 110 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                    VRAM:
+                  </Typography>
+                  <Box sx={{ 
+                    flex: 1,
+                    height: 6, 
+                    bgcolor: 'rgba(255,255,255,0.1)', 
+                    borderRadius: 3,
+                    overflow: 'hidden'
+                  }}>
+                    <Box sx={{ 
+                      width: `${hardware.gpu_vram.vram_usage_percent}%`,
+                      height: '100%',
+                      bgcolor: getUtilizationColor(hardware.gpu_vram.vram_usage_percent),
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </Box>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', minWidth: 35, fontSize: '0.7rem' }}>
+                    {hardware.gpu_vram.vram_usage_percent.toFixed(0)}%
+                  </Typography>
+                </Box>
+              </Tooltip>
+            )}
+          </>
+        )}
+
+        {/* CPU Usage */}
+        {hardware.cpu_usage_percent !== undefined && (
+          <Tooltip title={`CPU Usage: ${hardware.cpu_usage_percent.toFixed(1)}%`}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 110 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+                CPU:
+              </Typography>
+              <Box sx={{ 
+                flex: 1,
+                height: 6, 
+                bgcolor: 'rgba(255,255,255,0.1)', 
+                borderRadius: 3,
+                overflow: 'hidden'
+              }}>
+                <Box sx={{ 
+                  width: `${hardware.cpu_usage_percent}%`,
+                  height: '100%',
+                  bgcolor: getUtilizationColor(hardware.cpu_usage_percent),
+                  transition: 'width 0.3s ease'
+                }} />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', minWidth: 35, fontSize: '0.7rem' }}>
+                {hardware.cpu_usage_percent.toFixed(0)}%
+              </Typography>
+            </Box>
+          </Tooltip>
+        )}
+
+        {/* System RAM Usage */}
+        <Tooltip title={
+          <Box>
+            <Typography variant="body2">System Memory</Typography>
+            <Typography variant="caption">
+              Available: {hardware.memory_available_gb.toFixed(1)} GB<br />
+              Total: {hardware.memory_gb.toFixed(1)} GB
+            </Typography>
+          </Box>
+        }>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 110 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              RAM:
+            </Typography>
+            <Box sx={{ 
+              flex: 1,
+              height: 6, 
+              bgcolor: 'rgba(255,255,255,0.1)', 
+              borderRadius: 3,
+              overflow: 'hidden'
+            }}>
+              <Box sx={{ 
+                width: `${hardware.memory_usage_percent}%`,
+                height: '100%',
+                bgcolor: getUtilizationColor(hardware.memory_usage_percent),
+                transition: 'width 0.3s ease'
+              }} />
+            </Box>
+            <Typography variant="caption" sx={{ color: 'text.secondary', minWidth: 35, fontSize: '0.7rem' }}>
+              {hardware.memory_usage_percent.toFixed(0)}%
+            </Typography>
+          </Box>
+        </Tooltip>
+      </Box>
     </Box>
   );
 }
