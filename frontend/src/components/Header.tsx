@@ -23,6 +23,7 @@ import {
   Psychology as AiIcon,
   Code as CodeIcon,
   OpenInNew as OpenIcon,
+  Person as PersonIcon,
 } from '@mui/icons-material';
 import HelpDialog from './HelpDialog';
 
@@ -30,6 +31,7 @@ export default function Header() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [githubMenuAnchor, setGithubMenuAnchor] = useState<null | HTMLElement>(null);
   const [githubIconRotate, setGithubIconRotate] = useState(false);
+  const [aboutMenuAnchor, setAboutMenuAnchor] = useState<null | HTMLElement>(null);
 
   const handleGithubClick = (event: React.MouseEvent<HTMLElement>) => {
     setGithubMenuAnchor(event.currentTarget);
@@ -39,6 +41,14 @@ export default function Header() {
 
   const handleGithubClose = () => {
     setGithubMenuAnchor(null);
+  };
+
+  const handleAboutClick = (event: React.MouseEvent<HTMLElement>) => {
+    setAboutMenuAnchor(event.currentTarget);
+  };
+
+  const handleAboutClose = () => {
+    setAboutMenuAnchor(null);
   };
 
   const openLink = (url: string) => {
@@ -114,6 +124,21 @@ export default function Header() {
         </Box>
         
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="About Me">
+            <IconButton
+              onClick={handleAboutClick}
+              sx={{
+                color: 'text.secondary',
+                '&:hover': {
+                  color: 'primary.main',
+                  background: 'rgba(0, 180, 216, 0.1)',
+                },
+              }}
+            >
+              <PersonIcon />
+            </IconButton>
+          </Tooltip>
+
           <Tooltip title="Help & How to Use">
             <IconButton
               onClick={() => setHelpOpen(true)}
@@ -256,6 +281,49 @@ export default function Header() {
                 Powered by AI & Open Source
               </Typography>
             </Box>
+          </Menu>
+
+          {/* About Menu */}
+          <Menu
+            anchorEl={aboutMenuAnchor}
+            open={Boolean(aboutMenuAnchor)}
+            onClose={handleAboutClose}
+            TransitionComponent={Fade}
+            transitionDuration={300}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+            PaperProps={{
+              sx: {
+                mt: 1,
+                background: 'rgba(26, 31, 58, 0.95)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid rgba(0, 180, 216, 0.3)',
+                boxShadow: '0 8px 32px rgba(0, 180, 216, 0.2)',
+                minWidth: 300,
+                maxWidth: 400,
+                p: 2,
+              },
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <PersonIcon sx={{ color: 'primary.main', mr: 1.5, fontSize: 28 }} />
+              <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                About Me
+              </Typography>
+            </Box>
+            
+            <Divider sx={{ borderColor: 'rgba(0, 180, 216, 0.2)', mb: 2 }} />
+            
+            <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.8 }}>
+              {/* Content will be added here later */}
+              Coming soon...
+            </Typography>
           </Menu>
         </Box>
       </Toolbar>
